@@ -1,0 +1,25 @@
+<idea-plugin>
+    <id>com.example.j2html-preview</id>
+    <name>j2html Preview</name>
+    <vendor email="your.email@example.com" url="https://github.com/yourusername/j2html-preview-plugin">Your Name</vendor>
+    
+    <description><![CDATA[
+    Preview j2html components directly in IntelliJ IDEA.
+    
+    Features:
+    - Live HTML preview of j2html components
+    - Support for preview providers with sample data
+    - Component library documentation generation
+    ]]></description>
+    
+    <!-- Product and plugin compatibility requirements -->
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.java</depends>
+    
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="j2html Preview" 
+                    anchor="right"
+                    icon="AllIcons.Actions.Preview"
+                    factoryClass="com.example.j2htmlpreview.J2HtmlPreviewToolWindowFactory"/>
+    </extensions>
+</idea-plugin>
