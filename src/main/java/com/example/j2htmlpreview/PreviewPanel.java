@@ -1,10 +1,12 @@
 package com.example.j2htmlpreview;
 
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent;
 import com.intellij.openapi.fileEditor.FileEditorManagerListener;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.util.messages.MessageBusConnection;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
@@ -14,10 +16,11 @@ import java.awt.*;
  * Main UI panel for the j2html preview tool window.
  * Phase 2: Detects and displays the currently open file.
  */
-public class PreviewPanel extends JPanel {
+public class PreviewPanel extends JPanel implements Disposable {
     private final Project project;
     private final JLabel currentFileLabel;
     private final JEditorPane htmlPreview;
+    private MessageBusConnection messageBusConnection;
     
     public PreviewPanel(Project project) {
         this.project = project;
@@ -57,15 +60,15 @@ public class PreviewPanel extends JPanel {
      */
     private void setupFileListener() {
         // Get the message bus - IntelliJ's pub/sub system
-        project.getMessageBus()
-            .connect()
-            .subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, new FileEditorManagerListener() {
-                @Override
-                public void selectionChanged(@NotNull FileEditorManagerEvent event) {
-                    // This gets called whenever the user switches files
-                    updateCurrentFile();
-                }
-            });
+        // Store connection for proper disposal
+        messageBusConnection = project.getMessageBus().connect(this);
+        messageBusConnection.subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, new FileEditorManagerListener() {
+            @Override
+            public void selectionChanged(@NotNull FileEditorManagerEvent event) {
+                // This gets called whenever the user switches files
+                updateCurrentFile();
+            }
+        });
     }
     
     /**
@@ -76,14 +79,15 @@ public class PreviewPanel extends JPanel {
         FileEditorManager editorManager = FileEditorManager.getInstance(project);
         
         // Get the currently selected file (can be null if nothing is open)
-        VirtualFile currentFile = editorManager.getSelectedFiles().length > 0 
-            ? editorManager.getSelectedFiles()[0] 
-            : null;
+        VirtualFile[] selectedFiles = editorManager.getSelectedFiles();
+        VirtualFile currentFile = selectedFiles.length > 0 ? selectedFiles[0] : null;
         
         if (currentFile != null) {
             // Update the label with file info
-            currentFileLabel.setText("Current file: " + currentFile.getName() + 
-                                   " (" + currentFile.getPath() + ")");
+            currentFileLabel.setText("Current file: %s (%s)".formatted(
+                currentFile.getName(),
+                currentFile.getPath()
+            ));
             
             // Update the preview HTML
             htmlPreview.setText(getFileInfoHtml(currentFile));
@@ -177,5 +181,11 @@ public class PreviewPanel extends JPanel {
             </body>
             </html>
             """;
+    }
+    
+    @Override
+    public void dispose() {
+        // MessageBusConnection is automatically disposed when this Disposable is disposed
+        // No explicit cleanup needed here as we passed 'this' to connect(Disposable)
     }
 }
