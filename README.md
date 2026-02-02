@@ -2,13 +2,19 @@
 
 An IntelliJ IDEA plugin for previewing j2html components with live rendering.
 
-## Current Status: Phase 1
-- ✅ Basic tool window with static HTML preview
-- ⏳ Detect current Java file (Phase 2)
+## Current Status: Phase 2
+- ✅ Basic tool window with static HTML preview (Phase 1)
+- ✅ Detect current Java file (Phase 2)
 - ⏳ Find j2html methods (Phase 3)
 - ⏳ Execute and render (Phase 4)
 - ⏳ Preview providers (Phase 5)
 - ⏳ Live updates (Phase 6)
+
+## Phase 2 Features
+- **File Detection**: Automatically detects the currently open file in the editor
+- **Live Updates**: Preview updates automatically when you switch between files
+- **File Information Display**: Shows filename, extension, and full path
+- **Event-Driven Architecture**: Uses IntelliJ's MessageBus system to listen for file changes
 
 ## Development
 
