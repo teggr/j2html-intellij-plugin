@@ -6,6 +6,8 @@ import com.intellij.openapi.fileEditor.FileEditorManagerListener;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
+import com.intellij.psi.PsiTreeChangeAdapter;
+import com.intellij.psi.PsiTreeChangeEvent;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
@@ -23,6 +25,7 @@ public class PreviewPanel extends JPanel {
     private final JComboBox<String> methodSelector;
     private final JEditorPane htmlPreview;
     private final List<PsiMethod> j2htmlMethods = new ArrayList<>();
+    private VirtualFile currentVirtualFile = null;
     
     public PreviewPanel(Project project) {
         this.project = project;
@@ -61,6 +64,7 @@ public class PreviewPanel extends JPanel {
         
         // Listen for file changes
         setupFileListener();
+        setupPsiListener();  // ADD THIS LINE
         
         // Show current file if one is already open
         updateCurrentFile();
@@ -77,16 +81,45 @@ public class PreviewPanel extends JPanel {
             });
     }
     
+    /**
+     * Set up listener for PSI tree changes.
+     * PSI events are fired when code structure changes (methods added/removed/modified).
+     * IntelliJ batches these intelligently, so we don't need manual debouncing.
+     */
+    private void setupPsiListener() {
+        PsiManager.getInstance(project).addPsiTreeChangeListener(
+            new PsiTreeChangeAdapter() {
+                @Override
+                public void childrenChanged(@NotNull PsiTreeChangeEvent event) {
+                    // Check if this event is for our currently displayed file
+                    PsiFile changedFile = event.getFile();
+                    if (changedFile != null && currentVirtualFile != null) {
+                        VirtualFile changedVirtualFile = changedFile.getVirtualFile();
+                        if (currentVirtualFile.equals(changedVirtualFile)) {
+                            // Re-analyze the file since its structure changed
+                            analyzeFile(currentVirtualFile);
+                        }
+                    }
+                }
+            },
+            // This disposable ensures the listener is cleaned up when the tool window closes
+            // For now, we'll use a simple approach - in production you'd want proper disposal
+            () -> {}
+        );
+    }
+    
     private void updateCurrentFile() {
         FileEditorManager editorManager = FileEditorManager.getInstance(project);
-        VirtualFile currentFile = editorManager.getSelectedFiles().length > 0 
+        VirtualFile selectedFile = editorManager.getSelectedFiles().length > 0 
             ? editorManager.getSelectedFiles()[0] 
             : null;
         
-        if (currentFile != null) {
-            currentFileLabel.setText("Current file: " + currentFile.getName());
-            analyzeFile(currentFile);
+        if (selectedFile != null) {
+            currentVirtualFile = selectedFile;  // Track current file
+            currentFileLabel.setText("Current file: " + selectedFile.getName());
+            analyzeFile(selectedFile);
         } else {
+            currentVirtualFile = null;  // Clear tracked file
             currentFileLabel.setText("No file selected");
             j2htmlMethods.clear();
             updateMethodSelector();
