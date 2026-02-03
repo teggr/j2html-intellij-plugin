@@ -7,15 +7,23 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
 import org.jetbrains.annotations.NotNull;
+import com.intellij.openapi.module.Module;
+import com.intellij.openapi.module.ModuleUtilCore;
+import com.intellij.openapi.roots.OrderEnumerator;
 
 import javax.swing.*;
 import java.awt.*;
+import java.io.File;
+import java.lang.reflect.Method;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Main UI panel for the j2html preview tool window.
- * Phase 3: Finds and lists methods that return j2html types.
+ * Phase 4: Executes methods and renders HTML output.
  */
 public class PreviewPanel extends JPanel {
     private final Project project;
@@ -33,7 +41,7 @@ public class PreviewPanel extends JPanel {
         JPanel headerPanel = new JPanel(new BorderLayout());
         headerPanel.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
         
-        JLabel titleLabel = new JLabel("j2html Preview - Phase 3");
+        JLabel titleLabel = new JLabel("j2html Preview - Phase 4");
         titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 14f));
         
         currentFileLabel = new JLabel("No file selected");
@@ -234,13 +242,259 @@ public class PreviewPanel extends JPanel {
     
     /**
      * Called when user selects a method from the dropdown.
+     * Now executes the method and renders its output!
      */
     private void onMethodSelected() {
         int selectedIndex = methodSelector.getSelectedIndex();
         if (selectedIndex >= 0 && selectedIndex < j2htmlMethods.size()) {
             PsiMethod selectedMethod = j2htmlMethods.get(selectedIndex);
-            htmlPreview.setText(getMethodSelectedHtml(selectedMethod));
+            
+            // Execute the method and render its HTML
+            executeMethod(selectedMethod);
         }
+    }
+    
+    /**
+     * Execute the selected method and render its HTML output.
+     * Phase 4a: Only handles static methods with zero parameters.
+     */
+    private void executeMethod(PsiMethod psiMethod) {
+        try {
+            // Step 1: Get the containing class
+            PsiClass psiClass = psiMethod.getContainingClass();
+            if (psiClass == null) {
+                showError("Could not find containing class for method");
+                return;
+            }
+            
+            String qualifiedClassName = psiClass.getQualifiedName();
+            if (qualifiedClassName == null) {
+                showError("Could not determine qualified class name");
+                return;
+            }
+            
+            // Step 2: Check if method is static (we only handle static for now)
+            if (!psiMethod.hasModifierProperty(PsiModifier.STATIC)) {
+                showError("Method must be static. Non-static method execution not yet supported.");
+                return;
+            }
+            
+            // Step 3: Check if method has zero parameters (Phase 4a limitation)
+            if (psiMethod.getParameterList().getParametersCount() > 0) {
+                showError("Method has parameters. Parameter handling will be added in Phase 5.");
+                return;
+            }
+            
+            // Step 4: Get the module and build classloader
+            Module module = ModuleUtilCore.findModuleForPsiElement(psiClass);
+            if (module == null) {
+                showError("Could not find module for class");
+                return;
+            }
+            
+            ClassLoader moduleClassLoader = getModuleClassLoader(module);
+            
+            // Step 5: Load the compiled class
+            Class<?> loadedClass;
+            try {
+                loadedClass = Class.forName(qualifiedClassName, true, moduleClassLoader);
+            } catch (ClassNotFoundException e) {
+                showError("Class not found. Make sure the project is compiled: " + e.getMessage());
+                return;
+            }
+            
+            // Step 6: Get the reflection Method
+            Method reflectionMethod;
+            try {
+                reflectionMethod = loadedClass.getDeclaredMethod(psiMethod.getName());
+            } catch (NoSuchMethodException e) {
+                showError("Method not found in compiled class: " + e.getMessage());
+                return;
+            }
+            
+            // Step 7: Make method accessible (in case it's not public)
+            reflectionMethod.setAccessible(true);
+            
+            // Step 8: Invoke the method (null because it's static)
+            Object result;
+            try {
+                result = reflectionMethod.invoke(null);
+            } catch (Exception e) {
+                showError("Error invoking method: " + (e.getCause() != null ? e.getCause().getMessage() : e.getMessage()));
+                return;
+            }
+            
+            if (result == null) {
+                showError("Method returned null");
+                return;
+            }
+            
+            // Step 9: Render the j2html object to HTML
+            String renderedHtml = renderJ2HtmlObject(result);
+            
+            // Step 10: Display the rendered HTML
+            displayRenderedHtml(renderedHtml, psiMethod);
+            
+        } catch (Exception e) {
+            showError("Unexpected error: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    /**
+     * Build a classloader for the module that includes all dependencies.
+     * This ensures we can load both the user's compiled classes and j2html library.
+     */
+    private ClassLoader getModuleClassLoader(Module module) throws Exception {
+        List<String> classpathEntries = new ArrayList<>();
+        
+        // Get all classpath roots for the module (compiled output + dependencies)
+        OrderEnumerator.orderEntries(module)
+            .withoutSdk()  // We don't need JDK classes
+            .recursively() // Include transitive dependencies
+            .classes()     // Get class roots (not source roots)
+            .getRoots()
+            .forEach(root -> {
+                String path = root.getPath();
+                // Remove jar protocol if present (jar:file:/path/to.jar!/ → /path/to.jar)
+                if (path.startsWith("jar://")) {
+                    path = path.substring(6);
+                    int exclamation = path.indexOf("!");
+                    if (exclamation != -1) {
+                        path = path.substring(0, exclamation);
+                    }
+                }
+                classpathEntries.add(path);
+            });
+        
+        // Convert paths to URLs
+        URL[] urls = classpathEntries.stream()
+            .map(path -> {
+                try {
+                    return new File(path).toURI().toURL();
+                } catch (Exception e) {
+                    return null;
+                }
+            })
+            .filter(Objects::nonNull)
+            .toArray(URL[]::new);
+        
+        // Create classloader with module's classpath
+        return new URLClassLoader(urls, getClass().getClassLoader());
+    }
+    
+    /**
+     * Render a j2html object to HTML string.
+     * We use reflection to call .render() since we don't have j2html on plugin classpath.
+     */
+    private String renderJ2HtmlObject(Object j2htmlObject) throws Exception {
+        // All j2html objects (Tag, DomContent, etc.) have a render() method
+        Method renderMethod = j2htmlObject.getClass().getMethod("render");
+        Object result = renderMethod.invoke(j2htmlObject);
+        
+        if (!(result instanceof String)) {
+            throw new Exception("render() did not return a String");
+        }
+        
+        return (String) result;
+    }
+    
+    /**
+     * Display the rendered HTML in the preview pane with success styling.
+     */
+    private void displayRenderedHtml(String renderedHtml, PsiMethod method) {
+        String wrappedHtml = """
+            <html>
+            <head>
+                <style>
+                    body { 
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        padding: 20px;
+                        line-height: 1.6;
+                    }
+                    .success-banner {
+                        background: #d4edda;
+                        border: 1px solid #c3e6cb;
+                        border-radius: 8px;
+                        padding: 12px;
+                        margin-bottom: 20px;
+                        color: #155724;
+                    }
+                    .rendered-output {
+                        border: 2px solid #007bff;
+                        border-radius: 8px;
+                        padding: 20px;
+                        background: white;
+                        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+                    }
+                    .method-info {
+                        background: #f8f9fa;
+                        border-left: 4px solid #007bff;
+                        padding: 10px;
+                        margin-bottom: 15px;
+                        font-family: 'Courier New', monospace;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="success-banner">
+                    ✓ <strong>Phase 4 Success!</strong> Method executed and HTML rendered.
+                </div>
+                <div class="method-info">
+                    Rendered output from: <strong>%s()</strong>
+                </div>
+                <div class="rendered-output">
+                    %s
+                </div>
+            </body>
+            </html>
+            """.formatted(method.getName(), renderedHtml);
+        
+        htmlPreview.setText(wrappedHtml);
+    }
+    
+    /**
+     * Display an error message in the preview pane.
+     */
+    private void showError(String errorMessage) {
+        String errorHtml = """
+            <html>
+            <head>
+                <style>
+                    body { 
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        padding: 20px;
+                        line-height: 1.6;
+                    }
+                    .error {
+                        background: #f8d7da;
+                        border: 1px solid #f5c6cb;
+                        border-radius: 8px;
+                        padding: 16px;
+                        color: #721c24;
+                    }
+                    .error h3 {
+                        margin-top: 0;
+                        color: #721c24;
+                    }
+                    code {
+                        background: #fff;
+                        padding: 2px 6px;
+                        border-radius: 3px;
+                        font-family: 'Courier New', monospace;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="error">
+                    <h3>⚠ Execution Error</h3>
+                    <p><code>%s</code></p>
+                </div>
+            </body>
+            </html>
+            """.formatted(errorMessage);
+        
+        htmlPreview.setText(errorHtml);
     }
     
     private String getMethodSelectedHtml(PsiMethod method) {
