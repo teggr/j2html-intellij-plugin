@@ -20,6 +20,7 @@ import java.net.URLClassLoader;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Stream;
 
 /**
  * Main UI panel for the j2html preview tool window.
@@ -349,12 +350,12 @@ public class PreviewPanel extends JPanel {
         List<String> classpathEntries = new ArrayList<>();
         
         // Get all classpath roots for the module (compiled output + dependencies)
-        OrderEnumerator.orderEntries(module)
-            .withoutSdk()  // We don't need JDK classes
-            .recursively() // Include transitive dependencies
-            .classes()     // Get class roots (not source roots)
-            .getRoots()
-            .forEach(root -> {
+        VirtualFile[] roots = OrderEnumerator.orderEntries(module)
+          .withoutSdk()  // We don't need JDK classes
+          .recursively() // Include transitive dependencies
+          .classes()     // Get class roots (not source roots)
+          .getRoots();
+           Stream.of(roots).forEach(root -> {
                 String path = root.getPath();
                 // Remove jar protocol if present (jar:file:/path/to.jar!/ → /path/to.jar)
                 if (path.startsWith("jar://")) {
