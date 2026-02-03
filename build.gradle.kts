@@ -11,6 +11,10 @@ repositories {
     maven { url = uri("https://www.jetbrains.com/intellij-repository/releases") }
 }
 
+dependencies {
+    implementation("com.j2html:j2html:1.6.0")
+}
+
 // Configure the IntelliJ Platform plugin
 intellij {
     version.set("2024.1")

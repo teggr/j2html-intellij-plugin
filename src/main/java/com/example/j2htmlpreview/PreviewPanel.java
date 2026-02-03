@@ -1,5 +1,6 @@
 package com.example.j2htmlpreview;
 
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent;
 import com.intellij.openapi.fileEditor.FileEditorManagerListener;
@@ -10,6 +11,10 @@ import org.jetbrains.annotations.NotNull;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.roots.OrderEnumerator;
+import com.intellij.openapi.compiler.CompileContext;
+import com.intellij.openapi.compiler.CompileStatusNotification;
+import com.intellij.openapi.compiler.CompilerManager;
+import com.intellij.openapi.application.ReadAction;
 
 import javax.swing.*;
 import java.awt.*;
@@ -26,7 +31,7 @@ import java.util.stream.Stream;
  * Main UI panel for the j2html preview tool window.
  * Phase 4: Executes methods and renders HTML output.
  */
-public class PreviewPanel extends JPanel {
+public class PreviewPanel extends JPanel implements Disposable {
     private final Project project;
     private final JLabel currentFileLabel;
     private final JComboBox<String> methodSelector;
@@ -71,15 +76,20 @@ public class PreviewPanel extends JPanel {
         
         // Listen for file changes
         setupFileListener();
-        setupPsiListener();  // ADD THIS LINE
+        setupPsiListener();
         
         // Show current file if one is already open
         updateCurrentFile();
     }
     
+    @Override
+    public void dispose() {
+        // Cleanup is handled automatically by registering listeners with this Disposable
+    }
+    
     private void setupFileListener() {
         project.getMessageBus()
-            .connect()
+            .connect(this)
             .subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, new FileEditorManagerListener() {
                 @Override
                 public void selectionChanged(@NotNull FileEditorManagerEvent event) {
@@ -109,9 +119,7 @@ public class PreviewPanel extends JPanel {
                     }
                 }
             },
-            // This disposable ensures the listener is cleaned up when the tool window closes
-            // For now, we'll use a simple approach - in production you'd want proper disposal
-            () -> {}
+            this  // Register with this Disposable to ensure cleanup
         );
     }
     
@@ -243,16 +251,56 @@ public class PreviewPanel extends JPanel {
     
     /**
      * Called when user selects a method from the dropdown.
-     * Now executes the method and renders its output!
+     * Now triggers compilation first, then executes.
      */
     private void onMethodSelected() {
         int selectedIndex = methodSelector.getSelectedIndex();
         if (selectedIndex >= 0 && selectedIndex < j2htmlMethods.size()) {
             PsiMethod selectedMethod = j2htmlMethods.get(selectedIndex);
-            
-            // Execute the method and render its HTML
-            executeMethod(selectedMethod);
+            // Use invokeLater to ensure we're not in a PSI change listener context
+            SwingUtilities.invokeLater(() -> compileAndExecute(selectedMethod));
         }
+    }
+    
+    /**
+     * Compile the module containing the method, then execute it.
+     * 
+     * CompilerManager.make() is asynchronous - it returns immediately and
+     * notifies us via the callback when compilation is complete.
+     * 
+     * We use SwingUtilities.invokeLater() in the callback because the
+     * callback is NOT guaranteed to run on the UI thread.
+     */
+    private void compileAndExecute(PsiMethod psiMethod) {
+        // Get the module that contains the method - must use ReadAction
+        ReadAction.nonBlocking(() -> ModuleUtilCore.findModuleForPsiElement(psiMethod))
+            .finishOnUiThread(com.intellij.openapi.application.ModalityState.defaultModalityState(), module -> {
+                if (module == null) {
+                    showError("Could not find module for class");
+                    return;
+                }
+
+                // Show compiling state immediately (we're on UI thread here)
+                showInfo("Compiling...");
+
+                // Trigger compilation - this is async, so we continue in the callback
+                CompilerManager.getInstance(project).make(module, new CompileStatusNotification() {
+                    @Override
+                    public void finished(boolean aborted, int errors, int warnings, CompileContext context) {
+                        // We may NOT be on the UI thread here, so use invokeLater
+                        SwingUtilities.invokeLater(() -> {
+                            if (aborted) {
+                                showError("Compilation was aborted.");
+                            } else if (errors > 0) {
+                                showError("Compilation failed with " + errors + " error(s). Check the Problems panel for details.");
+                            } else {
+                                // Compilation succeeded - safe to execute now
+                                executeMethod(psiMethod);
+                            }
+                        });
+                    }
+                });
+            }).submit(com.intellij.util.concurrency.AppExecutorUtil.getAppExecutorService());
     }
     
     /**
@@ -260,45 +308,71 @@ public class PreviewPanel extends JPanel {
      * Phase 4a: Only handles static methods with zero parameters.
      */
     private void executeMethod(PsiMethod psiMethod) {
+        // Run slow PSI operations in a background thread with read access
+        ReadAction.nonBlocking(() -> {
+            try {
+                // Step 1: Get the containing class
+                PsiClass psiClass = psiMethod.getContainingClass();
+                if (psiClass == null) {
+                    return new ExecutionData("Could not find containing class for method", null, null, null);
+                }
+                
+                String qualifiedClassName = psiClass.getQualifiedName();
+                if (qualifiedClassName == null) {
+                    return new ExecutionData("Could not determine qualified class name", null, null, null);
+                }
+                
+                // Step 2: Check if method is static (we only handle static for now)
+                if (!psiMethod.hasModifierProperty(PsiModifier.STATIC)) {
+                    return new ExecutionData("Method must be static. Non-static method execution not yet supported.", null, null, null);
+                }
+                
+                // Step 3: Check if method has zero parameters (Phase 4a limitation)
+                if (psiMethod.getParameterList().getParametersCount() > 0) {
+                    return new ExecutionData("Method has parameters. Parameter handling will be added in Phase 5.", null, null, null);
+                }
+                
+                // Step 4: Get the module and build classloader
+                Module module = ModuleUtilCore.findModuleForPsiElement(psiClass);
+                if (module == null) {
+                    return new ExecutionData("Could not find module for class", null, null, null);
+                }
+                
+                return new ExecutionData(null, qualifiedClassName, psiMethod.getName(), module);
+            } catch (Exception e) {
+                return new ExecutionData("Error preparing execution: " + e.getMessage(), null, null, null);
+            }
+        }).finishOnUiThread(com.intellij.openapi.application.ModalityState.defaultModalityState(), data -> {
+            if (data.error != null) {
+                showError(data.error);
+                return;
+            }
+            executeMethodOnEdt(data);
+        }).submit(com.intellij.util.concurrency.AppExecutorUtil.getAppExecutorService());
+    }
+    
+    private static class ExecutionData {
+        final String error;
+        final String qualifiedClassName;
+        final String methodName;
+        final Module module;
+        
+        ExecutionData(String error, String qualifiedClassName, String methodName, Module module) {
+            this.error = error;
+            this.qualifiedClassName = qualifiedClassName;
+            this.methodName = methodName;
+            this.module = module;
+        }
+    }
+    
+    private void executeMethodOnEdt(ExecutionData data) {
         try {
-            // Step 1: Get the containing class
-            PsiClass psiClass = psiMethod.getContainingClass();
-            if (psiClass == null) {
-                showError("Could not find containing class for method");
-                return;
-            }
-            
-            String qualifiedClassName = psiClass.getQualifiedName();
-            if (qualifiedClassName == null) {
-                showError("Could not determine qualified class name");
-                return;
-            }
-            
-            // Step 2: Check if method is static (we only handle static for now)
-            if (!psiMethod.hasModifierProperty(PsiModifier.STATIC)) {
-                showError("Method must be static. Non-static method execution not yet supported.");
-                return;
-            }
-            
-            // Step 3: Check if method has zero parameters (Phase 4a limitation)
-            if (psiMethod.getParameterList().getParametersCount() > 0) {
-                showError("Method has parameters. Parameter handling will be added in Phase 5.");
-                return;
-            }
-            
-            // Step 4: Get the module and build classloader
-            Module module = ModuleUtilCore.findModuleForPsiElement(psiClass);
-            if (module == null) {
-                showError("Could not find module for class");
-                return;
-            }
-            
-            ClassLoader moduleClassLoader = getModuleClassLoader(module);
+            ClassLoader moduleClassLoader = getModuleClassLoader(data.module);
             
             // Step 5: Load the compiled class
             Class<?> loadedClass;
             try {
-                loadedClass = Class.forName(qualifiedClassName, true, moduleClassLoader);
+                loadedClass = Class.forName(data.qualifiedClassName, true, moduleClassLoader);
             } catch (ClassNotFoundException e) {
                 showError("Class not found. Make sure the project is compiled: " + e.getMessage());
                 return;
@@ -307,7 +381,7 @@ public class PreviewPanel extends JPanel {
             // Step 6: Get the reflection Method
             Method reflectionMethod;
             try {
-                reflectionMethod = loadedClass.getDeclaredMethod(psiMethod.getName());
+                reflectionMethod = loadedClass.getDeclaredMethod(data.methodName);
             } catch (NoSuchMethodException e) {
                 showError("Method not found in compiled class: " + e.getMessage());
                 return;
@@ -334,7 +408,7 @@ public class PreviewPanel extends JPanel {
             String renderedHtml = renderJ2HtmlObject(result);
             
             // Step 10: Display the rendered HTML
-            displayRenderedHtml(renderedHtml, psiMethod);
+            displayRenderedHtml(renderedHtml, data.methodName);
             
         } catch (Exception e) {
             showError("Unexpected error: " + e.getMessage());
@@ -403,7 +477,7 @@ public class PreviewPanel extends JPanel {
     /**
      * Display the rendered HTML in the preview pane with success styling.
      */
-    private void displayRenderedHtml(String renderedHtml, PsiMethod method) {
+    private void displayRenderedHtml(String renderedHtml, String methodName) {
         String wrappedHtml = """
             <html>
             <head>
@@ -449,7 +523,7 @@ public class PreviewPanel extends JPanel {
                 </div>
             </body>
             </html>
-            """.formatted(method.getName(), renderedHtml);
+            """.formatted(methodName, renderedHtml);
         
         htmlPreview.setText(wrappedHtml);
     }
@@ -496,6 +570,51 @@ public class PreviewPanel extends JPanel {
             """.formatted(errorMessage);
         
         htmlPreview.setText(errorHtml);
+    }
+    
+    /**
+     * Display an informational/status message in the preview pane.
+     * Used for transient states like "Compiling..."
+     */
+    private void showInfo(String message) {
+        String infoHtml = """
+            <html>
+            <head>
+                <style>
+                    body { 
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        padding: 20px;
+                        line-height: 1.6;
+                    }
+                    .info {
+                        background: #cce5ff;
+                        border: 1px solid #b8daff;
+                        border-radius: 8px;
+                        padding: 16px;
+                        color: #004085;
+                    }
+                    .info h3 {
+                        margin-top: 0;
+                        color: #004085;
+                    }
+                    code {
+                        background: #fff;
+                        padding: 2px 6px;
+                        border-radius: 3px;
+                        font-family: 'Courier New', monospace;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="info">
+                    <h3>ℹ Status</h3>
+                    <p><code>%s</code></p>
+                </div>
+            </body>
+            </html>
+            """.formatted(message);
+
+        htmlPreview.setText(infoHtml);
     }
     
     private String getMethodSelectedHtml(PsiMethod method) {
