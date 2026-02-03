@@ -21,6 +21,7 @@ import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.ui.EditorTextField;
 import com.intellij.ide.highlighter.JavaFileType;
 import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.openapi.diagnostic.Logger;
 
 import javax.swing.*;
 import java.awt.*;
@@ -38,6 +39,8 @@ import java.util.stream.Stream;
  * Phase 5: Expression evaluator with Java code editor.
  */
 public class PreviewPanel extends JPanel implements Disposable {
+    private static final Logger LOG = Logger.getInstance(PreviewPanel.class);
+    
     private final Project project;
     private final JLabel currentFileLabel;
     private final JComboBox<String> methodSelector;
@@ -455,7 +458,7 @@ public class PreviewPanel extends JPanel implements Disposable {
             
         } catch (Exception e) {
             showError("Unexpected error: " + e.getMessage());
-            e.printStackTrace();
+            LOG.error("Unexpected error executing method", e);
         }
     }
     
@@ -915,6 +918,8 @@ public class PreviewPanel extends JPanel implements Disposable {
     
     /**
      * Generate smart default values based on parameter type.
+     * Note: Generic types are simplified (e.g., List<String> becomes List.of()).
+     * Users can manually add type parameters if needed.
      */
     private String getDefaultValueForType(PsiType type) {
         String typeName = type.getPresentableText();
@@ -925,7 +930,7 @@ public class PreviewPanel extends JPanel implements Disposable {
             case "long", "Long" -> "0L";
             case "boolean", "Boolean" -> "false";
             case "double", "Double" -> "0.0";
-            case "List" -> "List.of()";
+            case "List" -> "List.of()";  // Simplified - users can add type params manually
             default -> {
                 // For custom types, try to use constructor
                 if (type instanceof PsiClassType psiClassType) {
@@ -989,7 +994,7 @@ public class PreviewPanel extends JPanel implements Disposable {
                             evaluateAndDisplay(fragment, module);
                         } catch (Exception e) {
                             showError("Error evaluating expression: " + e.getMessage());
-                            e.printStackTrace();
+                            LOG.error("Error evaluating expression", e);
                         }
                     }
                 });
@@ -1008,6 +1013,7 @@ public class PreviewPanel extends JPanel implements Disposable {
         // Wrap the expression in a temporary method and execute it
         
         // Create a temporary wrapper class with the expression
+        // Note: Using timestamp for uniqueness. In production, consider UUID for guaranteed uniqueness.
         String wrapperClassName = "ExpressionWrapper_" + System.currentTimeMillis();
         String wrapperCode = generateWrapperClass(wrapperClassName, expressionText, fragment);
         
@@ -1064,7 +1070,7 @@ public class PreviewPanel extends JPanel implements Disposable {
         // and suggest using Phase 4 for zero-param methods
         // Full expression evaluation would require the JavaCompiler API
         
-        throw new Exception("Full expression evaluation not yet implemented. Phase 5 foundation is in place. For now, use zero-parameter methods (Phase 4) or wait for full implementation.");
+        throw new Exception("Expression evaluation with parameters requires JavaCompiler API integration (planned for Phase 5b). Currently, only zero-parameter methods are fully supported. Use the method dropdown to select and execute zero-parameter methods directly.");
     }
     
     /**
