@@ -4,9 +4,17 @@ import j2html.tags.ContainerTag;
 import j2html.tags.DomContent;
 import j2html.tags.specialized.DivTag;
 
+import static j2html.TagCreator.*;
+
 /**
- * Example Java file with j2html methods for testing Phase 3.
+ * Example Java file with j2html methods for testing Phase 3 and Phase 4.
  * This file demonstrates the different types of methods that should be detected.
+ * 
+ * Phase 4 Test Methods:
+ * - simpleComponent() - zero params, static (should execute successfully)
+ * - loginForm() - zero params, static (should execute successfully)
+ * - userCard() - has params (should show error message)
+ * - container() - has varargs params (should show error message)
  */
 public class ExampleJ2HtmlComponents {
     
