@@ -1,5 +1,6 @@
 package com.example.j2htmlpreview;
 
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent;
 import com.intellij.openapi.fileEditor.FileEditorManagerListener;
@@ -29,7 +30,7 @@ import java.util.stream.Stream;
  * Main UI panel for the j2html preview tool window.
  * Phase 4: Executes methods and renders HTML output.
  */
-public class PreviewPanel extends JPanel {
+public class PreviewPanel extends JPanel implements Disposable {
     private final Project project;
     private final JLabel currentFileLabel;
     private final JComboBox<String> methodSelector;
@@ -74,15 +75,20 @@ public class PreviewPanel extends JPanel {
         
         // Listen for file changes
         setupFileListener();
-        setupPsiListener();  // ADD THIS LINE
+        setupPsiListener();
         
         // Show current file if one is already open
         updateCurrentFile();
     }
     
+    @Override
+    public void dispose() {
+        // Cleanup is handled automatically by registering listeners with this Disposable
+    }
+    
     private void setupFileListener() {
         project.getMessageBus()
-            .connect()
+            .connect(this)
             .subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, new FileEditorManagerListener() {
                 @Override
                 public void selectionChanged(@NotNull FileEditorManagerEvent event) {
@@ -112,9 +118,7 @@ public class PreviewPanel extends JPanel {
                     }
                 }
             },
-            // This disposable ensures the listener is cleaned up when the tool window closes
-            // For now, we'll use a simple approach - in production you'd want proper disposal
-            () -> {}
+            this  // Register with this Disposable to ensure cleanup
         );
     }
     

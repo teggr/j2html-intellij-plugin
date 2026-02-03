@@ -21,6 +21,7 @@ public class J2HtmlPreviewToolWindowFactory implements ToolWindowFactory {
         // Wrap it in a Content object and add to the tool window
         ContentFactory contentFactory = ContentFactory.getInstance();
         Content content = contentFactory.createContent(previewPanel, "", false);
+        content.setDisposer(previewPanel);  // Register disposable to prevent memory leaks
         toolWindow.getContentManager().addContent(content);
     }
 }
