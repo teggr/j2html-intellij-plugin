@@ -10,8 +10,12 @@ import org.jetbrains.annotations.NotNull;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.roots.OrderEnumerator;
+import com.intellij.openapi.compiler.CompileContext;
+import com.intellij.openapi.compiler.CompileStatusNotification;
+import com.intellij.openapi.compiler.CompilerManager;
 
 import javax.swing.*;
+import javax.swing.SwingUtilities;
 import java.awt.*;
 import java.io.File;
 import java.lang.reflect.Method;
@@ -243,16 +247,53 @@ public class PreviewPanel extends JPanel {
     
     /**
      * Called when user selects a method from the dropdown.
-     * Now executes the method and renders its output!
+     * Now triggers compilation first, then executes.
      */
     private void onMethodSelected() {
         int selectedIndex = methodSelector.getSelectedIndex();
         if (selectedIndex >= 0 && selectedIndex < j2htmlMethods.size()) {
             PsiMethod selectedMethod = j2htmlMethods.get(selectedIndex);
-            
-            // Execute the method and render its HTML
-            executeMethod(selectedMethod);
+            compileAndExecute(selectedMethod);
         }
+    }
+    
+    /**
+     * Compile the module containing the method, then execute it.
+     * 
+     * CompilerManager.make() is asynchronous - it returns immediately and
+     * notifies us via the callback when compilation is complete.
+     * 
+     * We use SwingUtilities.invokeLater() in the callback because the
+     * callback is NOT guaranteed to run on the UI thread.
+     */
+    private void compileAndExecute(PsiMethod psiMethod) {
+        // Get the module that contains the method
+        Module module = ModuleUtilCore.findModuleForPsiElement(psiMethod);
+        if (module == null) {
+            showError("Could not find module for class");
+            return;
+        }
+
+        // Show compiling state immediately (we're on UI thread here)
+        showInfo("Compiling...");
+
+        // Trigger compilation - this is async, so we continue in the callback
+        CompilerManager.getInstance(project).make(module, new CompileStatusNotification() {
+            @Override
+            public void finished(boolean aborted, int errors, int warnings, CompileContext context) {
+                // We may NOT be on the UI thread here, so use invokeLater
+                SwingUtilities.invokeLater(() -> {
+                    if (aborted) {
+                        showError("Compilation was aborted.");
+                    } else if (errors > 0) {
+                        showError("Compilation failed with " + errors + " error(s). Check the Problems panel for details.");
+                    } else {
+                        // Compilation succeeded - safe to execute now
+                        executeMethod(psiMethod);
+                    }
+                });
+            }
+        });
     }
     
     /**
@@ -496,6 +537,51 @@ public class PreviewPanel extends JPanel {
             """.formatted(errorMessage);
         
         htmlPreview.setText(errorHtml);
+    }
+    
+    /**
+     * Display an informational/status message in the preview pane.
+     * Used for transient states like "Compiling..."
+     */
+    private void showInfo(String message) {
+        String infoHtml = """
+            <html>
+            <head>
+                <style>
+                    body { 
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        padding: 20px;
+                        line-height: 1.6;
+                    }
+                    .info {
+                        background: #cce5ff;
+                        border: 1px solid #b8daff;
+                        border-radius: 8px;
+                        padding: 16px;
+                        color: #004085;
+                    }
+                    .info h3 {
+                        margin-top: 0;
+                        color: #004085;
+                    }
+                    code {
+                        background: #fff;
+                        padding: 2px 6px;
+                        border-radius: 3px;
+                        font-family: 'Courier New', monospace;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="info">
+                    <h3>ℹ Status</h3>
+                    <p><code>%s</code></p>
+                </div>
+            </body>
+            </html>
+            """.formatted(message);
+
+        htmlPreview.setText(infoHtml);
     }
     
     private String getMethodSelectedHtml(PsiMethod method) {
