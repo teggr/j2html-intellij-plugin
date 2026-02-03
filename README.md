@@ -2,13 +2,29 @@
 
 An IntelliJ IDEA plugin for previewing j2html components with live rendering.
 
-## Current Status: Phase 1
-- ✅ Basic tool window with static HTML preview
-- ⏳ Detect current Java file (Phase 2)
-- ⏳ Find j2html methods (Phase 3)
-- ⏳ Execute and render (Phase 4)
+## Current Status: Phase 4 (Compile-on-Demand)
+- ✅ Basic tool window with static HTML preview (Phase 1)
+- ✅ Detect current Java file (Phase 2)
+- ✅ Find j2html methods (Phase 3)
+- ✅ Execute and render with automatic compilation (Phase 4)
 - ⏳ Preview providers (Phase 5)
 - ⏳ Live updates (Phase 6)
+
+## Features
+
+### Phase 4: Compile-on-Demand Execution
+- Automatically compiles the module before executing methods
+- Asynchronous compilation with progress indication
+- Thread-safe UI updates using SwingUtilities.invokeLater()
+- Graceful error handling for compilation failures
+- Works seamlessly with code changes without manual builds
+
+### How It Works
+1. Open a Java file with j2html methods
+2. Select a method from the dropdown in the j2html Preview tool window
+3. Plugin automatically compiles the module
+4. Executes the method and displays rendered HTML
+5. Compilation errors are shown with detailed error counts
 
 ## Development
 
