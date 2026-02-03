@@ -15,7 +15,6 @@ import com.intellij.openapi.compiler.CompileStatusNotification;
 import com.intellij.openapi.compiler.CompilerManager;
 
 import javax.swing.*;
-import javax.swing.SwingUtilities;
 import java.awt.*;
 import java.io.File;
 import java.lang.reflect.Method;
