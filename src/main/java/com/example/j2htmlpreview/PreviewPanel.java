@@ -1033,43 +1033,57 @@ public class PreviewPanel extends JPanel implements Disposable {
         }
         lastCompilationTime = currentTime;
         
-        // Update the fragment with current text
-        JavaCodeFragmentFactory fragmentFactory = JavaCodeFragmentFactory.getInstance(project);
-        PsiExpressionCodeFragment fragment = fragmentFactory.createExpressionCodeFragment(
-            expressionText,
-            currentMethod.getContainingClass(),
-            currentMethod.getReturnType(),
-            true
-        );
-        
-        // Get the module for compilation
-        Module module = ModuleUtilCore.findModuleForPsiElement(currentMethod);
-        if (module == null) {
-            showError("Could not find module");
-            return;
-        }
-        
-        showInfo("Compiling expression...");
-        
-        // Compile the module first (ensures all dependencies are compiled)
-        CompilerManager.getInstance(project).make(module, new CompileStatusNotification() {
-            @Override
-            public void finished(boolean aborted, int errors, int warnings, CompileContext context) {
-                SwingUtilities.invokeLater(() -> {
-                    if (aborted) {
-                        showError("Compilation was aborted.");
-                    } else if (errors > 0) {
-                        showError("Compilation failed with " + errors + " error(s). Check the Problems panel.");
-                    } else {
-                        // Compilation succeeded - now evaluate the expression
-                        try {
-                            evaluateAndDisplay(fragment, module);
-                        } catch (Exception e) {
-                            showError("Error evaluating expression: " + e.getMessage());
-                            LOG.error("Error evaluating expression", e);
-                        }
+        // Move PSI and module operations to background thread to avoid EDT violations
+        com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            try {
+                // Perform PSI operations in read action
+                PsiExpressionCodeFragment fragment = ReadAction.compute(() -> {
+                    JavaCodeFragmentFactory fragmentFactory = JavaCodeFragmentFactory.getInstance(project);
+                    return fragmentFactory.createExpressionCodeFragment(
+                        expressionText,
+                        currentMethod.getContainingClass(),
+                        currentMethod.getReturnType(),
+                        true
+                    );
+                });
+                
+                // Get the module for compilation in read action
+                Module module = ReadAction.compute(() -> {
+                    return ModuleUtilCore.findModuleForPsiElement(currentMethod);
+                });
+                
+                if (module == null) {
+                    SwingUtilities.invokeLater(() -> showError("Could not find module"));
+                    return;
+                }
+                
+                SwingUtilities.invokeLater(() -> showInfo("Compiling expression..."));
+                
+                // Compile the module first (ensures all dependencies are compiled)
+                CompilerManager.getInstance(project).make(module, new CompileStatusNotification() {
+                    @Override
+                    public void finished(boolean aborted, int errors, int warnings, CompileContext context) {
+                        SwingUtilities.invokeLater(() -> {
+                            if (aborted) {
+                                showError("Compilation was aborted.");
+                            } else if (errors > 0) {
+                                showError("Compilation failed with " + errors + " error(s). Check the Problems panel.");
+                            } else {
+                                // Compilation succeeded - now evaluate the expression
+                                try {
+                                    evaluateAndDisplay(fragment, module);
+                                } catch (Exception e) {
+                                    showError("Error evaluating expression: " + e.getMessage());
+                                    LOG.error("Error evaluating expression", e);
+                                }
+                            }
+                        });
                     }
                 });
+                
+            } catch (Exception e) {
+                LOG.error("Error in executeExpression", e);
+                SwingUtilities.invokeLater(() -> showError("Error: " + e.getMessage()));
             }
         });
     }
@@ -1159,6 +1173,8 @@ public class PreviewPanel extends JPanel implements Disposable {
     private String buildClasspath(Module module) {
         List<String> classpathEntries = new ArrayList<>();
         
+        System.err.println("=== BUILD CLASSPATH DEBUG ===");
+        System.err.println("Building classpath for module: " + module.getName());
         LOG.info("Building classpath for module: " + module.getName());
         
         // Get all classpath roots (same as we did for the classloader)
@@ -1168,10 +1184,12 @@ public class PreviewPanel extends JPanel implements Disposable {
             .classes()
             .getRoots();
         
+        System.err.println("Found " + roots.length + " classpath roots from OrderEnumerator");
         LOG.info("Found " + roots.length + " classpath roots from OrderEnumerator");
         
         for (VirtualFile root : roots) {
             String path = root.getPath();
+            System.err.println("Processing classpath entry: " + path);
             LOG.info("Processing classpath entry: " + path);
             
             // Clean up jar:// protocol
@@ -1181,6 +1199,7 @@ public class PreviewPanel extends JPanel implements Disposable {
                 if (exclamation != -1) {
                     path = path.substring(0, exclamation);
                 }
+                System.err.println("  After jar:// cleanup: " + path);
                 LOG.info("  After jar:// cleanup: " + path);
             }
             
@@ -1188,6 +1207,8 @@ public class PreviewPanel extends JPanel implements Disposable {
             // This handles Windows paths correctly (e.g., /C:/ becomes C:\)
             File file = new File(path);
             String normalizedPath = file.getAbsolutePath();
+            System.err.println("  Normalized to: " + normalizedPath);
+            System.err.println("  File exists: " + file.exists());
             LOG.info("  Normalized to: " + normalizedPath);
             LOG.info("  File exists: " + file.exists());
             
@@ -1198,6 +1219,9 @@ public class PreviewPanel extends JPanel implements Disposable {
         String classpath = String.join(File.pathSeparator, classpathEntries);
         
         // Log the classpath for debugging
+        System.err.println("Built classpath with " + classpathEntries.size() + " entries for compilation");
+        System.err.println("Full classpath: " + classpath);
+        System.err.println("=== END BUILD CLASSPATH DEBUG ===");
         LOG.info("Built classpath with " + classpathEntries.size() + " entries for compilation");
         LOG.info("Full classpath: " + classpath);
         
@@ -1323,6 +1347,14 @@ public class PreviewPanel extends JPanel implements Disposable {
         command.add(sourceFile.toString());
         
         // Log the command for debugging
+        System.err.println("=== JAVAC COMMAND DEBUG ===");
+        System.err.println("Executing javac command:");
+        System.err.println("  javac: " + javacFile.getAbsolutePath());
+        System.err.println("  -classpath: " + classpath);
+        System.err.println("  -d: " + outputDir.toString());
+        System.err.println("  source: " + sourceFile.toString());
+        System.err.println("Full command: " + String.join(" ", command));
+        System.err.println("=== END JAVAC COMMAND DEBUG ===");
         LOG.info("Executing javac command: " + String.join(" ", command));
         
         // Execute javac
