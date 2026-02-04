@@ -1162,8 +1162,8 @@ public class PreviewPanel extends JPanel implements Disposable {
         LOG.info("Building classpath for module: " + module.getName());
         
         // Get all classpath roots (same as we did for the classloader)
+        // Try without withoutSdk() to see if that helps
         VirtualFile[] roots = OrderEnumerator.orderEntries(module)
-            .withoutSdk()
             .recursively()
             .classes()
             .getRoots();
