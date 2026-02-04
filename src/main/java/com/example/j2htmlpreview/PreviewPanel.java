@@ -1175,11 +1175,21 @@ public class PreviewPanel extends JPanel implements Disposable {
                         path = path.substring(0, exclamation);
                     }
                 }
+                // On Windows, paths might start with / before the drive letter (e.g., /C:/)
+                // Clean this up
+                if (path.matches("^/[A-Za-z]:/.*")) {
+                    path = path.substring(1); // Remove leading slash
+                }
                 classpathEntries.add(path);
             });
         
         // Join with system path separator (; on Windows, : on Unix)
-        return String.join(File.pathSeparator, classpathEntries);
+        String classpath = String.join(File.pathSeparator, classpathEntries);
+        
+        // Log the classpath for debugging
+        LOG.info("Built classpath for compilation: " + classpath);
+        
+        return classpath;
     }
     
     /**
@@ -1299,6 +1309,9 @@ public class PreviewPanel extends JPanel implements Disposable {
         command.add("-d");
         command.add(outputDir.toString());
         command.add(sourceFile.toString());
+        
+        // Log the command for debugging
+        LOG.info("Executing javac command: " + String.join(" ", command));
         
         // Execute javac
         ProcessBuilder pb = new ProcessBuilder(command);
