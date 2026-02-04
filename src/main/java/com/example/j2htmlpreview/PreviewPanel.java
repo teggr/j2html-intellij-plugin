@@ -1192,29 +1192,30 @@ public class PreviewPanel extends JPanel implements Disposable {
             System.err.println("Processing classpath entry: " + path);
             LOG.info("Processing classpath entry: " + path);
             
-            // Clean up jar:// protocol
+            // Clean up jar:// protocol and jar entry separators (!)
+            // VirtualFile paths can be:
+            // - jar://C:/path/file.jar!/entry/path (JAR with entry)
+            // - jar://C:/path/jdk!\module.name (JDK module)
+            // - /path/to/directory (regular directory)
             if (path.startsWith("jar://")) {
                 path = path.substring(6);
-                int exclamation = path.indexOf("!");
-                if (exclamation != -1) {
-                    path = path.substring(0, exclamation);
-                }
-                System.err.println("  After jar:// cleanup: " + path);
-                LOG.info("  After jar:// cleanup: " + path);
+                System.err.println("  Removed jar:// protocol: " + path);
+                LOG.info("  Removed jar:// protocol: " + path);
+            }
+            
+            // Remove jar entry separator (! or !/) and everything after it
+            // This handles both "file.jar!/" and "jdk!\module" formats
+            int exclamation = path.indexOf("!");
+            if (exclamation != -1) {
+                path = path.substring(0, exclamation);
+                System.err.println("  Removed ! separator and entry: " + path);
+                LOG.info("  Removed ! separator and entry: " + path);
             }
             
             // Convert to proper file system path
             // This handles Windows paths correctly (e.g., /C:/ becomes C:\)
             File file = new File(path);
             String normalizedPath = file.getAbsolutePath();
-            
-            // Remove trailing jar entry separator if present
-            // This can appear after normalization on Windows (e.g., "file.jar!//" becomes "file.jar!")
-            if (normalizedPath.endsWith("!")) {
-                normalizedPath = normalizedPath.substring(0, normalizedPath.length() - 1);
-                System.err.println("  Removed trailing ! from path");
-                LOG.info("  Removed trailing ! from path");
-            }
             
             System.err.println("  Normalized to: " + normalizedPath);
             System.err.println("  File exists: " + new File(normalizedPath).exists());
