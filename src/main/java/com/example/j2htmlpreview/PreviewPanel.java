@@ -1229,6 +1229,9 @@ public class PreviewPanel extends JPanel implements Disposable {
         
         // Java 8 path: Load tools.jar to get the compiler
         try {
+            // Note: This URLClassLoader must remain open for the lifetime of the compiler.
+            // The compiler instance references classes from tools.jar, so closing the
+            // classloader would break the compiler functionality.
             URLClassLoader loader = new URLClassLoader(
                 new URL[]{toolsJar.toURI().toURL()},
                 ClassLoader.getSystemClassLoader()
@@ -1245,7 +1248,8 @@ public class PreviewPanel extends JPanel implements Disposable {
             
             return compiler;
             
-        } catch (Exception e) {
+        } catch (ClassNotFoundException | NoSuchMethodException | IllegalAccessException | 
+                 java.lang.reflect.InvocationTargetException | java.net.MalformedURLException e) {
             throw new Exception("Failed to load Java compiler from project JDK: " + e.getMessage(), e);
         }
     }
