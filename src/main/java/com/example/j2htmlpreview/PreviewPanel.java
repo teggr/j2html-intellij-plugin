@@ -1178,22 +1178,19 @@ public class PreviewPanel extends JPanel implements Disposable {
                 
                 // Convert to proper file system path
                 // This handles Windows paths correctly (e.g., /C:/ becomes C:\)
-                try {
-                    File file = new File(path);
-                    String normalizedPath = file.getAbsolutePath();
-                    classpathEntries.add(normalizedPath);
-                } catch (Exception e) {
-                    LOG.warn("Failed to normalize path: " + path, e);
-                    // Fall back to original path if normalization fails
-                    classpathEntries.add(path);
-                }
+                File file = new File(path);
+                String normalizedPath = file.getAbsolutePath();
+                classpathEntries.add(normalizedPath);
             });
         
         // Join with system path separator (; on Windows, : on Unix)
         String classpath = String.join(File.pathSeparator, classpathEntries);
         
         // Log the classpath for debugging
-        LOG.info("Built classpath for compilation (" + classpathEntries.size() + " entries): " + classpath);
+        LOG.info("Built classpath with " + classpathEntries.size() + " entries for compilation");
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Full classpath: " + classpath);
+        }
         
         return classpath;
     }
