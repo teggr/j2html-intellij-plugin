@@ -1196,10 +1196,19 @@ public class PreviewPanel extends JPanel implements Disposable {
             // This handles Windows paths correctly (e.g., /C:/ becomes C:\)
             File file = new File(path);
             String normalizedPath = file.getAbsolutePath();
+            
+            // Remove trailing jar entry separator if present
+            // This can appear after normalization on Windows (e.g., "file.jar!//" becomes "file.jar!")
+            if (normalizedPath.endsWith("!")) {
+                normalizedPath = normalizedPath.substring(0, normalizedPath.length() - 1);
+                System.err.println("  Removed trailing ! from path");
+                LOG.info("  Removed trailing ! from path");
+            }
+            
             System.err.println("  Normalized to: " + normalizedPath);
-            System.err.println("  File exists: " + file.exists());
+            System.err.println("  File exists: " + new File(normalizedPath).exists());
             LOG.info("  Normalized to: " + normalizedPath);
-            LOG.info("  File exists: " + file.exists());
+            LOG.info("  File exists: " + new File(normalizedPath).exists());
             
             classpathEntries.add(normalizedPath);
         }
