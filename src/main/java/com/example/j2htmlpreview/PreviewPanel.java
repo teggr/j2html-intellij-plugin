@@ -22,6 +22,7 @@ import com.intellij.ui.EditorTextField;
 import com.intellij.ide.highlighter.JavaFileType;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.util.Alarm;
 
 import javax.swing.*;
 import java.awt.*;
@@ -40,6 +41,8 @@ import java.util.stream.Stream;
  */
 public class PreviewPanel extends JPanel implements Disposable {
     private static final Logger LOG = Logger.getInstance(PreviewPanel.class);
+    private static final int DEBOUNCE_DELAY_MS = 400; // Debounce delay for PSI changes
+    private static final long COMPILATION_THROTTLE_MS = 2500; // Minimum interval between compilations
     
     private final Project project;
     private final JLabel currentFileLabel;
@@ -53,8 +56,14 @@ public class PreviewPanel extends JPanel implements Disposable {
     private PsiExpressionCodeFragment currentFragment;
     private PsiMethod currentMethod;
     
+    // Fix for multiple recompilations issue
+    private boolean isUpdatingMethodSelector = false; // Prevents ActionListener during programmatic updates
+    private final Alarm psiChangeAlarm; // Debounces PSI change events
+    private long lastCompilationTime = 0; // Tracks last compilation to throttle
+    
     public PreviewPanel(Project project) {
         this.project = project;
+        this.psiChangeAlarm = new Alarm(Alarm.ThreadToUse.SWING_THREAD, this);
         setLayout(new BorderLayout());
         
         // Header panel
@@ -69,7 +78,12 @@ public class PreviewPanel extends JPanel implements Disposable {
         
         // Method selector dropdown
         methodSelector = new JComboBox<>();
-        methodSelector.addActionListener(e -> onMethodSelected());
+        methodSelector.addActionListener(e -> {
+            // Only fire if not updating programmatically
+            if (!isUpdatingMethodSelector) {
+                onMethodSelected();
+            }
+        });
         
         JPanel selectorPanel = new JPanel(new BorderLayout());
         selectorPanel.add(new JLabel("Select method: "), BorderLayout.WEST);
@@ -121,6 +135,8 @@ public class PreviewPanel extends JPanel implements Disposable {
     
     @Override
     public void dispose() {
+        // Cancel any pending debounced tasks
+        psiChangeAlarm.cancelAllRequests();
         // Cleanup is handled automatically by registering listeners with this Disposable
     }
     
@@ -136,9 +152,9 @@ public class PreviewPanel extends JPanel implements Disposable {
     }
     
     /**
-     * Set up listener for PSI tree changes.
+     * Set up listener for PSI tree changes with debouncing.
      * PSI events are fired when code structure changes (methods added/removed/modified).
-     * IntelliJ batches these intelligently, so we don't need manual debouncing.
+     * We debounce these events to avoid triggering analysis on every keystroke.
      */
     private void setupPsiListener() {
         PsiManager.getInstance(project).addPsiTreeChangeListener(
@@ -150,8 +166,9 @@ public class PreviewPanel extends JPanel implements Disposable {
                     if (changedFile != null && currentVirtualFile != null) {
                         VirtualFile changedVirtualFile = changedFile.getVirtualFile();
                         if (currentVirtualFile.equals(changedVirtualFile)) {
-                            // Re-analyze the file since its structure changed
-                            analyzeFile(currentVirtualFile);
+                            // Debounce: Cancel any pending request and schedule a new one
+                            psiChangeAlarm.cancelAllRequests();
+                            psiChangeAlarm.addRequest(() -> analyzeFile(currentVirtualFile), DEBOUNCE_DELAY_MS);
                         }
                     }
                 }
@@ -245,19 +262,44 @@ public class PreviewPanel extends JPanel implements Disposable {
     
     /**
      * Update the method selector dropdown with found methods.
+     * Preserves the current selection to avoid unwanted re-execution.
      */
     private void updateMethodSelector() {
-        methodSelector.removeAllItems();
+        // Prevent ActionListener from firing during programmatic updates
+        isUpdatingMethodSelector = true;
         
-        if (j2htmlMethods.isEmpty()) {
-            methodSelector.addItem("No j2html methods found");
-            methodSelector.setEnabled(false);
-        } else {
-            methodSelector.setEnabled(true);
-            for (PsiMethod method : j2htmlMethods) {
-                String signature = buildMethodSignature(method);
-                methodSelector.addItem(signature);
+        try {
+            // Store current selection
+            int previousIndex = methodSelector.getSelectedIndex();
+            String previousSelection = previousIndex >= 0 ? (String) methodSelector.getSelectedItem() : null;
+            
+            methodSelector.removeAllItems();
+            
+            if (j2htmlMethods.isEmpty()) {
+                methodSelector.addItem("No j2html methods found");
+                methodSelector.setEnabled(false);
+            } else {
+                methodSelector.setEnabled(true);
+                
+                // Build list of new signatures
+                List<String> newSignatures = new ArrayList<>();
+                for (PsiMethod method : j2htmlMethods) {
+                    String signature = buildMethodSignature(method);
+                    newSignatures.add(signature);
+                    methodSelector.addItem(signature);
+                }
+                
+                // Restore previous selection if it still exists
+                if (previousSelection != null) {
+                    int newIndex = newSignatures.indexOf(previousSelection);
+                    if (newIndex >= 0) {
+                        methodSelector.setSelectedIndex(newIndex);
+                    }
+                }
             }
+        } finally {
+            // Re-enable ActionListener
+            isUpdatingMethodSelector = false;
         }
     }
     
@@ -289,6 +331,7 @@ public class PreviewPanel extends JPanel implements Disposable {
     /**
      * Called when user selects a method from the dropdown.
      * Phase 5: Handles parameterized methods by populating expression editor.
+     * Fixed: No longer auto-executes zero-parameter methods to prevent unwanted compilations.
      */
     private void onMethodSelected() {
         int selectedIndex = methodSelector.getSelectedIndex();
@@ -296,9 +339,10 @@ public class PreviewPanel extends JPanel implements Disposable {
             PsiMethod selectedMethod = j2htmlMethods.get(selectedIndex);
             currentMethod = selectedMethod;
             
-            // For zero-parameter methods, execute directly (Phase 4 behavior)
+            // For zero-parameter methods, populate the expression editor but don't auto-execute
             if (selectedMethod.getParameterList().getParametersCount() == 0) {
-                SwingUtilities.invokeLater(() -> compileAndExecute(selectedMethod));
+                populateExpressionEditor(selectedMethod);
+                showInfo("Zero-parameter method selected. Click 'Compile and Preview' to execute.");
             } else {
                 // For methods with parameters, populate the expression editor
                 populateExpressionEditor(selectedMethod);
@@ -309,6 +353,7 @@ public class PreviewPanel extends JPanel implements Disposable {
     
     /**
      * Compile the module containing the method, then execute it.
+     * Now includes throttling to prevent multiple overlapping compilations.
      * 
      * CompilerManager.make() is asynchronous - it returns immediately and
      * notifies us via the callback when compilation is complete.
@@ -317,6 +362,14 @@ public class PreviewPanel extends JPanel implements Disposable {
      * callback is NOT guaranteed to run on the UI thread.
      */
     private void compileAndExecute(PsiMethod psiMethod) {
+        // Throttle compilation requests
+        long currentTime = System.currentTimeMillis();
+        if (currentTime - lastCompilationTime < COMPILATION_THROTTLE_MS) {
+            showInfo("Please wait... compilation is still in progress or too soon since last compilation.");
+            return;
+        }
+        lastCompilationTime = currentTime;
+        
         // Get the module that contains the method - must use ReadAction
         ReadAction.nonBlocking(() -> ModuleUtilCore.findModuleForPsiElement(psiMethod))
             .finishOnUiThread(com.intellij.openapi.application.ModalityState.defaultModalityState(), module -> {
@@ -960,6 +1013,14 @@ public class PreviewPanel extends JPanel implements Disposable {
             showError("Expression is empty");
             return;
         }
+        
+        // Throttle compilation requests
+        long currentTime = System.currentTimeMillis();
+        if (currentTime - lastCompilationTime < COMPILATION_THROTTLE_MS) {
+            showInfo("Please wait... compilation is still in progress or too soon since last compilation.");
+            return;
+        }
+        lastCompilationTime = currentTime;
         
         // Update the fragment with current text
         JavaCodeFragmentFactory fragmentFactory = JavaCodeFragmentFactory.getInstance(project);
