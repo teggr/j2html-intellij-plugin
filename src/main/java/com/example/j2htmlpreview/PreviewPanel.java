@@ -1159,38 +1159,47 @@ public class PreviewPanel extends JPanel implements Disposable {
     private String buildClasspath(Module module) {
         List<String> classpathEntries = new ArrayList<>();
         
+        LOG.info("Building classpath for module: " + module.getName());
+        
         // Get all classpath roots (same as we did for the classloader)
-        OrderEnumerator.orderEntries(module)
+        VirtualFile[] roots = OrderEnumerator.orderEntries(module)
             .withoutSdk()
             .recursively()
             .classes()
-            .getRoots()
-            .forEach(root -> {
-                String path = root.getPath();
-                // Clean up jar:// protocol
-                if (path.startsWith("jar://")) {
-                    path = path.substring(6);
-                    int exclamation = path.indexOf("!");
-                    if (exclamation != -1) {
-                        path = path.substring(0, exclamation);
-                    }
+            .getRoots();
+        
+        LOG.info("Found " + roots.length + " classpath roots from OrderEnumerator");
+        
+        for (VirtualFile root : roots) {
+            String path = root.getPath();
+            LOG.info("Processing classpath entry: " + path);
+            
+            // Clean up jar:// protocol
+            if (path.startsWith("jar://")) {
+                path = path.substring(6);
+                int exclamation = path.indexOf("!");
+                if (exclamation != -1) {
+                    path = path.substring(0, exclamation);
                 }
-                
-                // Convert to proper file system path
-                // This handles Windows paths correctly (e.g., /C:/ becomes C:\)
-                File file = new File(path);
-                String normalizedPath = file.getAbsolutePath();
-                classpathEntries.add(normalizedPath);
-            });
+                LOG.info("  After jar:// cleanup: " + path);
+            }
+            
+            // Convert to proper file system path
+            // This handles Windows paths correctly (e.g., /C:/ becomes C:\)
+            File file = new File(path);
+            String normalizedPath = file.getAbsolutePath();
+            LOG.info("  Normalized to: " + normalizedPath);
+            LOG.info("  File exists: " + file.exists());
+            
+            classpathEntries.add(normalizedPath);
+        }
         
         // Join with system path separator (; on Windows, : on Unix)
         String classpath = String.join(File.pathSeparator, classpathEntries);
         
         // Log the classpath for debugging
         LOG.info("Built classpath with " + classpathEntries.size() + " entries for compilation");
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("Full classpath: " + classpath);
-        }
+        LOG.info("Full classpath: " + classpath);
         
         return classpath;
     }
