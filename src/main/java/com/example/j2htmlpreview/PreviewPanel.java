@@ -1183,8 +1183,25 @@ public class PreviewPanel extends JPanel implements Disposable {
     }
     
     /**
+     * Get the JDK home path for the project's configured SDK.
+     * Returns null if no SDK is configured or path is not available.
+     */
+    private String getProjectJdkHome() {
+        try {
+            Sdk projectSdk = ProjectRootManager.getInstance(project).getProjectSdk();
+            if (projectSdk != null) {
+                return projectSdk.getHomePath();
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to get project JDK home", e);
+        }
+        return null;
+    }
+    
+    /**
      * Get JavaCompiler from the project's configured JDK.
      * This works even if IntelliJ itself is running on a JRE.
+     * Returns null if compiler API is not accessible (will fall back to process-based compilation).
      */
     private JavaCompiler getProjectJavaCompiler() throws Exception {
         // Get the project's configured SDK
@@ -1208,25 +1225,18 @@ public class PreviewPanel extends JPanel implements Disposable {
         if (!toolsJar.exists()) {
             // Java 9+ path - no tools.jar exists
             // The compiler should be available via the system if running on this JDK
-            // We need to use the JDK's bin/javac instead
             
-            // For Java 9+, we can try getting the system compiler
-            // If IntelliJ is running on a different JDK, we need to invoke javac as a process
-            // For simplicity, let's try the system compiler first
+            // Try getting the system compiler first
             JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
             
             if (compiler != null) {
                 return compiler;
             }
             
-            // If system compiler not available, we need to invoke the project JDK's javac
-            // This is a fallback for when IntelliJ runs on JRE but project uses JDK
-            throw new Exception(
-                "Java compiler not directly accessible. " +
-                "Project JDK is at: " + jdkHomePath + ". " +
-                "Please ensure IntelliJ IDEA is running on a JDK (File → Project Structure → Platform Settings → SDKs), " +
-                "or use a JDK installation for IntelliJ itself (Help → Find Action → Choose Boot Java Runtime)."
-            );
+            // If system compiler not available, return null to signal that we need
+            // to use process-based compilation (compileViaProcess method)
+            // This handles the case where IntelliJ runs on JRE but project uses Java 9+ JDK
+            return null;
         }
         
         // Java 8 path: Load tools.jar to get the compiler
@@ -1253,6 +1263,74 @@ public class PreviewPanel extends JPanel implements Disposable {
         } catch (ClassNotFoundException | NoSuchMethodException | IllegalAccessException | 
                  InvocationTargetException | MalformedURLException e) {
             throw new Exception("Failed to load Java compiler from project JDK: " + e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Compile source code using process-based javac invocation.
+     * This is a fallback when JavaCompiler API is not accessible (Java 9+ with IntelliJ on JRE).
+     * 
+     * @param sourceFile The Java source file to compile
+     * @param classpath The classpath to use for compilation
+     * @param outputDir The directory where compiled classes should be placed
+     * @return true if compilation succeeded, false otherwise
+     * @throws Exception if javac cannot be executed or other errors occur
+     */
+    private boolean compileViaProcess(Path sourceFile, String classpath, Path outputDir) throws Exception {
+        String jdkHome = getProjectJdkHome();
+        if (jdkHome == null) {
+            throw new Exception("Cannot compile via process: JDK home path not available");
+        }
+        
+        // Determine javac executable path
+        File javacFile = new File(jdkHome, "bin/javac");
+        if (!javacFile.exists()) {
+            javacFile = new File(jdkHome, "bin/javac.exe"); // Windows
+        }
+        
+        if (!javacFile.exists()) {
+            throw new Exception("javac not found at: " + javacFile.getAbsolutePath());
+        }
+        
+        // Build command
+        List<String> command = new ArrayList<>();
+        command.add(javacFile.getAbsolutePath());
+        command.add("-classpath");
+        command.add(classpath);
+        command.add("-d");
+        command.add(outputDir.toString());
+        command.add(sourceFile.toString());
+        
+        // Execute javac
+        ProcessBuilder pb = new ProcessBuilder(command);
+        pb.redirectErrorStream(true);
+        
+        try {
+            Process process = pb.start();
+            
+            // Read output
+            StringBuilder output = new StringBuilder();
+            try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    output.append(line).append("\n");
+                }
+            }
+            
+            int exitCode = process.waitFor();
+            
+            if (exitCode != 0) {
+                throw new Exception("Compilation failed:\n" + output.toString());
+            }
+            
+            return true;
+            
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new Exception("Compilation interrupted", e);
+        } catch (java.io.IOException e) {
+            throw new Exception("Failed to execute javac: " + e.getMessage(), e);
         }
     }
     
@@ -1302,43 +1380,53 @@ public class PreviewPanel extends JPanel implements Disposable {
         Path sourceFile = sourceDir.resolve(className + ".java");
         Files.writeString(sourceFile, sourceCode);
         
-        // Prepare compilation options
-        List<String> options = new ArrayList<>();
-        options.add("-classpath");
-        options.add(classpath);
-        options.add("-d");
-        options.add(tempDir.toString());
+        // Check if we have a JavaCompiler or need to use process-based compilation
+        boolean compilationSuccess;
         
-        // Get diagnostic collector to capture compilation errors
-        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
-        StandardJavaFileManager fileManager = compiler.getStandardFileManager(diagnostics, null, null);
-        
-        // Get compilation units
-        Iterable<? extends JavaFileObject> compilationUnits = 
-            fileManager.getJavaFileObjectsFromFiles(Collections.singletonList(sourceFile.toFile()));
-        
-        // Compile
-        JavaCompiler.CompilationTask task = compiler.getTask(
-            null,                    // Writer for additional output
-            fileManager,            // File manager
-            diagnostics,            // Diagnostic listener
-            options,                // Compiler options
-            null,                   // Classes for annotation processing
-            compilationUnits        // Compilation units
-        );
-        
-        boolean success = task.call();
-        fileManager.close();
-        
-        if (!success) {
-            // Compilation failed - format error messages
-            StringBuilder errors = new StringBuilder("Compilation failed:\n");
-            for (Diagnostic<? extends JavaFileObject> diagnostic : diagnostics.getDiagnostics()) {
-                errors.append(String.format("Line %d: %s\n", 
-                    diagnostic.getLineNumber(), 
-                    diagnostic.getMessage(null)));
+        if (compiler != null) {
+            // Use JavaCompiler API
+            // Prepare compilation options
+            List<String> options = new ArrayList<>();
+            options.add("-classpath");
+            options.add(classpath);
+            options.add("-d");
+            options.add(tempDir.toString());
+            
+            // Get diagnostic collector to capture compilation errors
+            DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+            StandardJavaFileManager fileManager = compiler.getStandardFileManager(diagnostics, null, null);
+            
+            // Get compilation units
+            Iterable<? extends JavaFileObject> compilationUnits = 
+                fileManager.getJavaFileObjectsFromFiles(Collections.singletonList(sourceFile.toFile()));
+            
+            // Compile
+            JavaCompiler.CompilationTask task = compiler.getTask(
+                null,                    // Writer for additional output
+                fileManager,            // File manager
+                diagnostics,            // Diagnostic listener
+                options,                // Compiler options
+                null,                   // Classes for annotation processing
+                compilationUnits        // Compilation units
+            );
+            
+            compilationSuccess = task.call();
+            fileManager.close();
+            
+            if (!compilationSuccess) {
+                // Compilation failed - format error messages
+                StringBuilder errors = new StringBuilder("Compilation failed:\n");
+                for (Diagnostic<? extends JavaFileObject> diagnostic : diagnostics.getDiagnostics()) {
+                    errors.append(String.format("Line %d: %s\n", 
+                        diagnostic.getLineNumber(), 
+                        diagnostic.getMessage(null)));
+                }
+                throw new Exception(errors.toString());
             }
-            throw new Exception(errors.toString());
+        } else {
+            // Fall back to process-based compilation (Java 9+ with IntelliJ on JRE)
+            LOG.info("Using process-based javac compilation (JavaCompiler API not available)");
+            compilationSuccess = compileViaProcess(sourceFile, classpath, tempDir);
         }
         
         // Load the compiled class
