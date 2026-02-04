@@ -30,7 +30,9 @@ import javax.swing.*;
 import javax.tools.*;
 import java.awt.*;
 import java.io.File;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.Files;
@@ -1249,7 +1251,7 @@ public class PreviewPanel extends JPanel implements Disposable {
             return compiler;
             
         } catch (ClassNotFoundException | NoSuchMethodException | IllegalAccessException | 
-                 java.lang.reflect.InvocationTargetException | java.net.MalformedURLException e) {
+                 InvocationTargetException | MalformedURLException e) {
             throw new Exception("Failed to load Java compiler from project JDK: " + e.getMessage(), e);
         }
     }
