@@ -25,12 +25,16 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.util.Alarm;
 
 import javax.swing.*;
+import javax.tools.*;
 import java.awt.*;
 import java.io.File;
 import java.lang.reflect.Method;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Stream;
@@ -1070,24 +1074,27 @@ public class PreviewPanel extends JPanel implements Disposable {
      * Evaluate the compiled expression and display the result.
      * This is similar to executeMethod but works with expressions.
      */
+    /**
+     * Evaluate the compiled expression and display the result.
+     * Uses JavaCompiler API to compile and execute arbitrary Java expressions.
+     */
     private void evaluateAndDisplay(PsiExpressionCodeFragment fragment, Module module) throws Exception {
-        String expressionText = fragment.getText();
+        String expressionText = fragment.getText().trim();
         
-        // For Phase 5, we'll use a simplified approach:
-        // Wrap the expression in a temporary method and execute it
-        
-        // Create a temporary wrapper class with the expression
-        // Note: Using timestamp for uniqueness. In production, consider UUID for guaranteed uniqueness.
+        // Generate wrapper class
         String wrapperClassName = "ExpressionWrapper_" + System.currentTimeMillis();
         String wrapperCode = generateWrapperClass(wrapperClassName, expressionText, fragment);
         
-        // Compile the wrapper (this is a simplified approach - production would use JavaCompiler API)
-        // For now, we'll execute the expression by treating it as a method call
-        // and using the existing execution infrastructure
+        // Get classpath for compilation
+        String classpath = buildClasspath(module);
         
-        // Parse the expression to extract method name and arguments
-        // This is a simplified implementation - assumes expression is a method call
-        Object result = evaluateExpressionReflection(expressionText, module);
+        // Compile the wrapper class
+        Class<?> wrapperClass = compileAndLoadClass(wrapperClassName, wrapperCode, classpath, module);
+        
+        // Execute the eval() method
+        Method evalMethod = wrapperClass.getDeclaredMethod("eval");
+        evalMethod.setAccessible(true);
+        Object result = evalMethod.invoke(null);
         
         if (result == null) {
             showError("Expression returned null");
@@ -1102,60 +1109,185 @@ public class PreviewPanel extends JPanel implements Disposable {
     }
     
     /**
-     * Simplified expression evaluation using reflection.
-     * Assumes expression is a static method call like "userCard(new User(...))"
+     * Generate a wrapper class that contains the expression as a method.
+     * Includes all necessary imports from the context.
      */
-    private Object evaluateExpressionReflection(String expressionText, Module module) throws Exception {
-        // This is a simplified implementation for Phase 5
-        // It handles basic method calls but not complex expressions
+    private String generateWrapperClass(String className, String expression, PsiExpressionCodeFragment fragment) {
+        StringBuilder code = new StringBuilder();
         
-        // For a complete implementation, you'd use JavaCompiler API or
-        // debugger evaluator, but this works for our use case
-        
-        // Parse method name (everything before first '(')
-        int parenIndex = expressionText.indexOf('(');
-        if (parenIndex == -1) {
-            throw new Exception("Expression must be a method call");
+        // Get the package from the context
+        PsiElement context = fragment.getContext();
+        PsiJavaFile javaFile = null;
+        if (context != null) {
+            javaFile = (PsiJavaFile) context.getContainingFile();
         }
         
-        String methodName = expressionText.substring(0, parenIndex).trim();
-        
-        // Get the class
-        PsiClass containingClass = currentMethod.getContainingClass();
-        if (containingClass == null) {
-            throw new Exception("Could not find containing class");
+        // Add package declaration
+        if (javaFile != null && !javaFile.getPackageName().isEmpty()) {
+            code.append("package ").append(javaFile.getPackageName()).append(";\n");
+            code.append("\n");
         }
         
-        String qualifiedClassName = containingClass.getQualifiedName();
-        ClassLoader classLoader = getModuleClassLoader(module);
-        Class<?> clazz = Class.forName(qualifiedClassName, true, classLoader);
+        // Add imports from the original file
+        if (javaFile != null) {
+            PsiImportList importList = javaFile.getImportList();
+            if (importList != null) {
+                for (PsiImportStatement importStatement : importList.getImportStatements()) {
+                    code.append(importStatement.getText()).append("\n");
+                }
+                for (PsiImportStaticStatement importStatic : importList.getImportStaticStatements()) {
+                    code.append(importStatic.getText()).append("\n");
+                }
+            }
+            code.append("\n");
+        }
         
-        // For Phase 5, we'll show an error for parameterized methods
-        // and suggest using Phase 4 for zero-param methods
-        // Full expression evaluation would require the JavaCompiler API
+        // Generate the wrapper class
+        code.append("public class ").append(className).append(" {\n");
+        code.append("    public static Object eval() {\n");
+        code.append("        return ").append(expression).append(";\n");
+        code.append("    }\n");
+        code.append("}\n");
         
-        throw new Exception("Expression evaluation with parameters requires JavaCompiler API integration (planned for Phase 5b). Currently, only zero-parameter methods are fully supported. Use the method dropdown to select and execute zero-parameter methods directly.");
+        return code.toString();
     }
     
     /**
-     * Generate a temporary wrapper class for expression evaluation.
-     * This would be used in a complete implementation with JavaCompiler API.
+     * Build the classpath string needed for JavaCompiler.
+     * Includes all module dependencies and compiled output.
      */
-    private String generateWrapperClass(String className, String expression, PsiExpressionCodeFragment fragment) {
-        PsiClass contextClass = PsiTreeUtil.getParentOfType(fragment.getContext(), PsiClass.class);
-        String packageName = contextClass != null && contextClass.getContainingFile() instanceof PsiJavaFile
-            ? ((PsiJavaFile) contextClass.getContainingFile()).getPackageName()
-            : "";
+    private String buildClasspath(Module module) {
+        List<String> classpathEntries = new ArrayList<>();
         
-        StringBuilder code = new StringBuilder();
-        if (!packageName.isEmpty()) {
-            code.append("package ").append(packageName).append(";\n");
+        // Get all classpath roots (same as we did for the classloader)
+        OrderEnumerator.orderEntries(module)
+            .withoutSdk()
+            .recursively()
+            .classes()
+            .getRoots()
+            .forEach(root -> {
+                String path = root.getPath();
+                // Clean up jar:// protocol
+                if (path.startsWith("jar://")) {
+                    path = path.substring(6);
+                    int exclamation = path.indexOf("!");
+                    if (exclamation != -1) {
+                        path = path.substring(0, exclamation);
+                    }
+                }
+                classpathEntries.add(path);
+            });
+        
+        // Join with system path separator (; on Windows, : on Unix)
+        return String.join(File.pathSeparator, classpathEntries);
+    }
+    
+    /**
+     * Compile the wrapper class source code and load it into memory.
+     * Uses JavaCompiler API for runtime compilation.
+     */
+    private Class<?> compileAndLoadClass(String className, String sourceCode, String classpath, Module module) 
+            throws Exception {
+        
+        // Get the Java Compiler
+        JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
+        if (compiler == null) {
+            throw new Exception("No Java compiler available. Make sure you're running on a JDK (not JRE).");
         }
         
-        code.append("\npublic class ").append(className).append(" {\n");
-        code.append("  public static Object evaluate() {\n");
-        code.append("    return ").append(expression).append(";\n");
-        code.append("  }\n");
+        // Create temporary directory for compilation
+        Path tempDir = Files.createTempDirectory("j2html_expr_");
+        tempDir.toFile().deleteOnExit();
+        
+        // Determine package path
+        String packagePath = "";
+        int lastDot = className.lastIndexOf('.');
+        if (lastDot > 0) {
+            packagePath = className.substring(0, lastDot).replace('.', '/');
+            className = className.substring(lastDot + 1);
+        }
+        
+        // Create source file
+        Path sourceDir = tempDir;
+        if (!packagePath.isEmpty()) {
+            sourceDir = tempDir.resolve(packagePath);
+            Files.createDirectories(sourceDir);
+        }
+        
+        Path sourceFile = sourceDir.resolve(className + ".java");
+        Files.writeString(sourceFile, sourceCode);
+        
+        // Prepare compilation options
+        List<String> options = new ArrayList<>();
+        options.add("-classpath");
+        options.add(classpath);
+        options.add("-d");
+        options.add(tempDir.toString());
+        
+        // Get diagnostic collector to capture compilation errors
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        StandardJavaFileManager fileManager = compiler.getStandardFileManager(diagnostics, null, null);
+        
+        // Get compilation units
+        Iterable<? extends JavaFileObject> compilationUnits = 
+            fileManager.getJavaFileObjectsFromFiles(Collections.singletonList(sourceFile.toFile()));
+        
+        // Compile
+        JavaCompiler.CompilationTask task = compiler.getTask(
+            null,                    // Writer for additional output
+            fileManager,            // File manager
+            diagnostics,            // Diagnostic listener
+            options,                // Compiler options
+            null,                   // Classes for annotation processing
+            compilationUnits        // Compilation units
+        );
+        
+        boolean success = task.call();
+        fileManager.close();
+        
+        if (!success) {
+            // Compilation failed - format error messages
+            StringBuilder errors = new StringBuilder("Compilation failed:\n");
+            for (Diagnostic<? extends JavaFileObject> diagnostic : diagnostics.getDiagnostics()) {
+                errors.append(String.format("Line %d: %s\n", 
+                    diagnostic.getLineNumber(), 
+                    diagnostic.getMessage(null)));
+            }
+            throw new Exception(errors.toString());
+        }
+        
+        // Load the compiled class
+        URLClassLoader classLoader = new URLClassLoader(
+            new URL[]{tempDir.toUri().toURL()},
+            getModuleClassLoader(module)
+        );
+        
+        // Full class name includes package if present
+        String fullClassName = packagePath.isEmpty() ? className : packagePath.replace('/', '.') + '.' + className;
+        return classLoader.loadClass(fullClassName);
+    }
+            code.append("\n");
+        }
+        
+        // Add imports from the original file
+        if (javaFile != null) {
+            PsiImportList importList = javaFile.getImportList();
+            if (importList != null) {
+                for (PsiImportStatement importStatement : importList.getImportStatements()) {
+                    code.append(importStatement.getText()).append("\n");
+                }
+                for (PsiImportStaticStatement importStatic : importList.getImportStaticStatements()) {
+                    code.append(importStatic.getText()).append("\n");
+                }
+            }
+            code.append("\n");
+        }
+        
+        // Generate the wrapper class
+        code.append("public class ").append(className).append(" {\n");
+        code.append("    public static Object eval() {\n");
+        code.append("        return ").append(expression).append(";\n");
+        code.append("    }\n");
         code.append("}\n");
         
         return code.toString();
