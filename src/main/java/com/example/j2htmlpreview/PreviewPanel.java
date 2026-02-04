@@ -961,10 +961,21 @@ public class PreviewPanel extends JPanel implements Disposable {
     
     /**
      * Build a template method call with smart defaults for parameters.
-     * E.g., "userCard(new User(\"\", \"\"), \"\")"
+     * E.g., "ClassName.userCard(new User(\"\", \"\"), \"\")" for static methods
+     * or "methodName(...)" for instance methods.
      */
     private String buildMethodCallTemplate(PsiMethod method) {
         StringBuilder sb = new StringBuilder();
+        
+        // For static methods, prefix with class name to make them accessible
+        // This allows calling methods from the same class without static imports
+        if (method.hasModifierProperty(PsiModifier.STATIC)) {
+            PsiClass containingClass = method.getContainingClass();
+            if (containingClass != null) {
+                sb.append(containingClass.getName()).append(".");
+            }
+        }
+        
         sb.append(method.getName()).append("(");
         
         PsiParameter[] params = method.getParameterList().getParameters();
