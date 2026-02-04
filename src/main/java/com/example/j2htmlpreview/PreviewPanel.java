@@ -1033,57 +1033,46 @@ public class PreviewPanel extends JPanel implements Disposable {
         }
         lastCompilationTime = currentTime;
         
-        // Move PSI and module operations to background thread to avoid EDT violations
-        com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread(() -> {
-            try {
-                // Perform PSI operations in read action
-                PsiExpressionCodeFragment fragment = ReadAction.compute(() -> {
-                    JavaCodeFragmentFactory fragmentFactory = JavaCodeFragmentFactory.getInstance(project);
-                    return fragmentFactory.createExpressionCodeFragment(
-                        expressionText,
-                        currentMethod.getContainingClass(),
-                        currentMethod.getReturnType(),
-                        true
-                    );
-                });
-                
-                // Get the module for compilation in read action
-                Module module = ReadAction.compute(() -> {
-                    return ModuleUtilCore.findModuleForPsiElement(currentMethod);
-                });
-                
-                if (module == null) {
-                    SwingUtilities.invokeLater(() -> showError("Could not find module"));
-                    return;
+        // Create fragment and get module
+        // These are quick operations, can be done on EDT with ReadAction
+        JavaCodeFragmentFactory fragmentFactory = JavaCodeFragmentFactory.getInstance(project);
+        PsiExpressionCodeFragment fragment = fragmentFactory.createExpressionCodeFragment(
+            expressionText,
+            currentMethod.getContainingClass(),
+            currentMethod.getReturnType(),
+            true
+        );
+        
+        Module module = ModuleUtilCore.findModuleForPsiElement(currentMethod);
+        if (module == null) {
+            showError("Could not find module");
+            return;
+        }
+        
+        showInfo("Compiling expression...");
+        
+        // CompilerManager.make() MUST be called on EDT
+        CompilerManager.getInstance(project).make(module, new CompileStatusNotification() {
+            @Override
+            public void finished(boolean aborted, int errors, int warnings, CompileContext context) {
+                if (aborted) {
+                    showError("Compilation was aborted.");
+                } else if (errors > 0) {
+                    showError("Compilation failed with " + errors + " error(s). Check the Problems panel.");
+                } else {
+                    // Compilation succeeded - now evaluate the expression
+                    // Move heavy compilation work to background thread
+                    com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread(() -> {
+                        try {
+                            evaluateAndDisplay(fragment, module);
+                        } catch (Exception e) {
+                            SwingUtilities.invokeLater(() -> {
+                                showError("Error evaluating expression: " + e.getMessage());
+                                LOG.error("Error evaluating expression", e);
+                            });
+                        }
+                    });
                 }
-                
-                SwingUtilities.invokeLater(() -> showInfo("Compiling expression..."));
-                
-                // Compile the module first (ensures all dependencies are compiled)
-                CompilerManager.getInstance(project).make(module, new CompileStatusNotification() {
-                    @Override
-                    public void finished(boolean aborted, int errors, int warnings, CompileContext context) {
-                        SwingUtilities.invokeLater(() -> {
-                            if (aborted) {
-                                showError("Compilation was aborted.");
-                            } else if (errors > 0) {
-                                showError("Compilation failed with " + errors + " error(s). Check the Problems panel.");
-                            } else {
-                                // Compilation succeeded - now evaluate the expression
-                                try {
-                                    evaluateAndDisplay(fragment, module);
-                                } catch (Exception e) {
-                                    showError("Error evaluating expression: " + e.getMessage());
-                                    LOG.error("Error evaluating expression", e);
-                                }
-                            }
-                        });
-                    }
-                });
-                
-            } catch (Exception e) {
-                LOG.error("Error in executeExpression", e);
-                SwingUtilities.invokeLater(() -> showError("Error: " + e.getMessage()));
             }
         });
     }
