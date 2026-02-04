@@ -1273,10 +1273,9 @@ public class PreviewPanel extends JPanel implements Disposable {
      * @param sourceFile The Java source file to compile
      * @param classpath The classpath to use for compilation
      * @param outputDir The directory where compiled classes should be placed
-     * @return true if compilation succeeded, false otherwise
-     * @throws Exception if javac cannot be executed or other errors occur
+     * @throws Exception if javac cannot be executed or compilation fails
      */
-    private boolean compileViaProcess(Path sourceFile, String classpath, Path outputDir) throws Exception {
+    private void compileViaProcess(Path sourceFile, String classpath, Path outputDir) throws Exception {
         String jdkHome = getProjectJdkHome();
         if (jdkHome == null) {
             throw new Exception("Cannot compile via process: JDK home path not available");
@@ -1316,6 +1315,8 @@ public class PreviewPanel extends JPanel implements Disposable {
                 while ((line = reader.readLine()) != null) {
                     output.append(line).append("\n");
                 }
+            } catch (java.io.IOException e) {
+                throw new Exception("Failed to read javac output: " + e.getMessage(), e);
             }
             
             int exitCode = process.waitFor();
@@ -1324,13 +1325,11 @@ public class PreviewPanel extends JPanel implements Disposable {
                 throw new Exception("Compilation failed:\n" + output.toString());
             }
             
-            return true;
-            
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new Exception("Compilation interrupted", e);
         } catch (java.io.IOException e) {
-            throw new Exception("Failed to execute javac: " + e.getMessage(), e);
+            throw new Exception("Failed to start javac process: " + e.getMessage(), e);
         }
     }
     
@@ -1426,7 +1425,7 @@ public class PreviewPanel extends JPanel implements Disposable {
         } else {
             // Fall back to process-based compilation (Java 9+ with IntelliJ on JRE)
             LOG.info("Using process-based javac compilation (JavaCompiler API not available)");
-            compilationSuccess = compileViaProcess(sourceFile, classpath, tempDir);
+            compileViaProcess(sourceFile, classpath, tempDir);
         }
         
         // Load the compiled class
