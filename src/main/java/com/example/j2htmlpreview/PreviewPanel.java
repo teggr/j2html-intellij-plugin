@@ -1072,10 +1072,6 @@ public class PreviewPanel extends JPanel implements Disposable {
     
     /**
      * Evaluate the compiled expression and display the result.
-     * This is similar to executeMethod but works with expressions.
-     */
-    /**
-     * Evaluate the compiled expression and display the result.
      * Uses JavaCompiler API to compile and execute arbitrary Java expressions.
      */
     private void evaluateAndDisplay(PsiExpressionCodeFragment fragment, Module module) throws Exception {
@@ -1185,6 +1181,15 @@ public class PreviewPanel extends JPanel implements Disposable {
     /**
      * Compile the wrapper class source code and load it into memory.
      * Uses JavaCompiler API for runtime compilation.
+     * 
+     * Note on resource management:
+     * - Temporary files are marked with deleteOnExit() for cleanup on JVM shutdown.
+     *   This is acceptable for a development tool with short-lived IDE sessions.
+     * - The URLClassLoader is not explicitly closed because the loaded class needs
+     *   to remain accessible for the duration of the preview display. The classloader
+     *   will be garbage collected when no longer referenced.
+     * - For production use, consider implementing explicit cleanup of old classloaders
+     *   and temporary directories.
      */
     private Class<?> compileAndLoadClass(String className, String sourceCode, String classpath, Module module) 
             throws Exception {
@@ -1196,6 +1201,8 @@ public class PreviewPanel extends JPanel implements Disposable {
         }
         
         // Create temporary directory for compilation
+        // Note: deleteOnExit() is used for automatic cleanup. In a long-running server
+        // context, consider explicit cleanup to avoid memory leaks from JVM's internal list.
         Path tempDir = Files.createTempDirectory("j2html_expr_");
         tempDir.toFile().deleteOnExit();
         
@@ -1214,6 +1221,9 @@ public class PreviewPanel extends JPanel implements Disposable {
             Files.createDirectories(sourceDir);
         }
         
+        // Write source code to temporary file
+        // Note: File permissions are set by default. For multi-user systems in production,
+        // consider using Files.setPosixFilePermissions() to restrict access.
         Path sourceFile = sourceDir.resolve(className + ".java");
         Files.writeString(sourceFile, sourceCode);
         
@@ -1257,6 +1267,9 @@ public class PreviewPanel extends JPanel implements Disposable {
         }
         
         // Load the compiled class
+        // Note: URLClassLoader is not closed here because the returned Class object
+        // needs the classloader to remain alive. The classloader will be GC'd when
+        // the class and its instances are no longer referenced.
         URLClassLoader classLoader = new URLClassLoader(
             new URL[]{tempDir.toUri().toURL()},
             getModuleClassLoader(module)
