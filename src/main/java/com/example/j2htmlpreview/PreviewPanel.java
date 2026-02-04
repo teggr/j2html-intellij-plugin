@@ -1266,30 +1266,4 @@ public class PreviewPanel extends JPanel implements Disposable {
         String fullClassName = packagePath.isEmpty() ? className : packagePath.replace('/', '.') + '.' + className;
         return classLoader.loadClass(fullClassName);
     }
-            code.append("\n");
-        }
-        
-        // Add imports from the original file
-        if (javaFile != null) {
-            PsiImportList importList = javaFile.getImportList();
-            if (importList != null) {
-                for (PsiImportStatement importStatement : importList.getImportStatements()) {
-                    code.append(importStatement.getText()).append("\n");
-                }
-                for (PsiImportStaticStatement importStatic : importList.getImportStaticStatements()) {
-                    code.append(importStatic.getText()).append("\n");
-                }
-            }
-            code.append("\n");
-        }
-        
-        // Generate the wrapper class
-        code.append("public class ").append(className).append(" {\n");
-        code.append("    public static Object eval() {\n");
-        code.append("        return ").append(expression).append(";\n");
-        code.append("    }\n");
-        code.append("}\n");
-        
-        return code.toString();
-    }
 }
