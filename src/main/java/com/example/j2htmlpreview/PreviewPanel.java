@@ -1380,8 +1380,6 @@ public class PreviewPanel extends JPanel implements Disposable {
         Files.writeString(sourceFile, sourceCode);
         
         // Check if we have a JavaCompiler or need to use process-based compilation
-        boolean compilationSuccess;
-        
         if (compiler != null) {
             // Use JavaCompiler API
             // Prepare compilation options
@@ -1409,10 +1407,10 @@ public class PreviewPanel extends JPanel implements Disposable {
                 compilationUnits        // Compilation units
             );
             
-            compilationSuccess = task.call();
+            boolean success = task.call();
             fileManager.close();
             
-            if (!compilationSuccess) {
+            if (!success) {
                 // Compilation failed - format error messages
                 StringBuilder errors = new StringBuilder("Compilation failed:\n");
                 for (Diagnostic<? extends JavaFileObject> diagnostic : diagnostics.getDiagnostics()) {
