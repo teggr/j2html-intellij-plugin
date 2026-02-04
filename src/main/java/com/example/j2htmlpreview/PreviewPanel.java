@@ -332,6 +332,9 @@ public class PreviewPanel extends JPanel implements Disposable {
      * Called when user selects a method from the dropdown.
      * Phase 5: Handles parameterized methods by populating expression editor.
      * Fixed: No longer auto-executes zero-parameter methods to prevent unwanted compilations.
+     * 
+     * Note: This method is only called for user-initiated selections, not during
+     * programmatic updates (protected by isUpdatingMethodSelector flag in ActionListener).
      */
     private void onMethodSelected() {
         int selectedIndex = methodSelector.getSelectedIndex();
