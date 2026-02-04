@@ -39,8 +39,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Stream;
 
 /**
@@ -1095,14 +1097,27 @@ public class PreviewPanel extends JPanel implements Disposable {
     private void evaluateAndDisplay(PsiExpressionCodeFragment fragment, Module module) throws Exception {
         String expressionText = fragment.getText().trim();
         
-        // Generate wrapper class
-        String wrapperClassName = "ExpressionWrapper_" + System.currentTimeMillis();
-        String wrapperCode = generateWrapperClass(wrapperClassName, expressionText, fragment);
+        // Get package name from context
+        String packageName = "";
+        PsiElement context = fragment.getContext();
+        if (context != null) {
+            PsiJavaFile javaFile = (PsiJavaFile) context.getContainingFile();
+            if (javaFile != null) {
+                packageName = javaFile.getPackageName();
+            }
+        }
+        
+        // Generate wrapper class (simple name only)
+        String simpleClassName = "ExpressionWrapper_" + System.currentTimeMillis();
+        String wrapperCode = generateWrapperClass(simpleClassName, expressionText, fragment);
+        
+        // Full qualified name includes package
+        String wrapperClassName = packageName.isEmpty() ? simpleClassName : packageName + "." + simpleClassName;
         
         // Get classpath for compilation
         String classpath = buildClasspath(module);
         
-        // Compile the wrapper class
+        // Compile the wrapper class (pass fully qualified name)
         Class<?> wrapperClass = compileAndLoadClass(wrapperClassName, wrapperCode, classpath, module);
         
         // Execute the eval() method
@@ -1171,27 +1186,28 @@ public class PreviewPanel extends JPanel implements Disposable {
      * Includes all module dependencies and compiled output.
      */
     private String buildClasspath(Module module) {
-        List<String> classpathEntries = new ArrayList<>();
+        // Use LinkedHashSet to preserve order and automatically deduplicate
+        Set<String> classpathEntries = new LinkedHashSet<>();
         
         System.err.println("=== BUILD CLASSPATH DEBUG ===");
         System.err.println("Building classpath for module: " + module.getName());
         LOG.info("Building classpath for module: " + module.getName());
-        
+
         // Get all classpath roots (same as we did for the classloader)
         // Try without withoutSdk() to see if that helps
         VirtualFile[] roots = OrderEnumerator.orderEntries(module)
             .recursively()
             .classes()
             .getRoots();
-        
+
         System.err.println("Found " + roots.length + " classpath roots from OrderEnumerator");
         LOG.info("Found " + roots.length + " classpath roots from OrderEnumerator");
-        
+
         for (VirtualFile root : roots) {
             String path = root.getPath();
             System.err.println("Processing classpath entry: " + path);
             LOG.info("Processing classpath entry: " + path);
-            
+
             // Clean up jar:// protocol and jar entry separators (!)
             // VirtualFile paths can be:
             // - jar://C:/path/file.jar!/entry/path (JAR with entry)
@@ -1211,7 +1227,7 @@ public class PreviewPanel extends JPanel implements Disposable {
                 System.err.println("  Removed ! separator and entry: " + path);
                 LOG.info("  Removed ! separator and entry: " + path);
             }
-            
+
             // Convert to proper file system path
             // This handles Windows paths correctly (e.g., /C:/ becomes C:\)
             File file = new File(path);
@@ -1221,7 +1237,7 @@ public class PreviewPanel extends JPanel implements Disposable {
             System.err.println("  File exists: " + new File(normalizedPath).exists());
             LOG.info("  Normalized to: " + normalizedPath);
             LOG.info("  File exists: " + new File(normalizedPath).exists());
-            
+
             classpathEntries.add(normalizedPath);
         }
         
@@ -1233,7 +1249,9 @@ public class PreviewPanel extends JPanel implements Disposable {
         System.err.println("Full classpath: " + classpath);
         System.err.println("=== END BUILD CLASSPATH DEBUG ===");
         LOG.info("Built classpath with " + classpathEntries.size() + " entries for compilation");
-        LOG.info("Full classpath: " + classpath);
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Full classpath: " + classpath);
+        }
         
         return classpath;
     }
@@ -1350,6 +1368,10 @@ public class PreviewPanel extends JPanel implements Disposable {
         // Build command
         List<String> command = new ArrayList<>();
         command.add(javacFile.getAbsolutePath());
+        command.add("-source");
+        command.add("17");  // Compile for Java 17 (IntelliJ's runtime version)
+        command.add("-target");
+        command.add("17");  // Target Java 17 bytecode
         command.add("-classpath");
         command.add(classpath);
         command.add("-d");
@@ -1388,9 +1410,25 @@ public class PreviewPanel extends JPanel implements Disposable {
             
             int exitCode = process.waitFor();
             
+            System.err.println("=== JAVAC RESULT DEBUG ===");
+            System.err.println("Exit code: " + exitCode);
+            System.err.println("Output: " + output.toString());
+            System.err.println("=== END JAVAC RESULT DEBUG ===");
+            
             if (exitCode != 0) {
                 throw new Exception("Compilation failed:\n" + output.toString());
             }
+            
+            // Verify .class file was created
+            System.err.println("=== COMPILED FILES DEBUG ===");
+            try {
+                Files.walk(outputDir)
+                    .filter(Files::isRegularFile)
+                    .forEach(file -> System.err.println("  Found: " + file));
+            } catch (java.io.IOException e) {
+                System.err.println("  Failed to list files: " + e.getMessage());
+            }
+            System.err.println("=== END COMPILED FILES DEBUG ===");
             
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -1451,6 +1489,10 @@ public class PreviewPanel extends JPanel implements Disposable {
             // Use JavaCompiler API
             // Prepare compilation options
             List<String> options = new ArrayList<>();
+            options.add("-source");
+            options.add("17");  // Compile for Java 17 (IntelliJ's runtime version)
+            options.add("-target");
+            options.add("17");  // Target Java 17 bytecode
             options.add("-classpath");
             options.add(classpath);
             options.add("-d");
