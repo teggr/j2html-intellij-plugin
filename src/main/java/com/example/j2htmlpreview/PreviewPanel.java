@@ -1175,19 +1175,25 @@ public class PreviewPanel extends JPanel implements Disposable {
                         path = path.substring(0, exclamation);
                     }
                 }
-                // On Windows, paths might start with / before the drive letter (e.g., /C:/)
-                // Clean this up
-                if (path.matches("^/[A-Za-z]:/.*")) {
-                    path = path.substring(1); // Remove leading slash
+                
+                // Convert to proper file system path
+                // This handles Windows paths correctly (e.g., /C:/ becomes C:\)
+                try {
+                    File file = new File(path);
+                    String normalizedPath = file.getAbsolutePath();
+                    classpathEntries.add(normalizedPath);
+                } catch (Exception e) {
+                    LOG.warn("Failed to normalize path: " + path, e);
+                    // Fall back to original path if normalization fails
+                    classpathEntries.add(path);
                 }
-                classpathEntries.add(path);
             });
         
         // Join with system path separator (; on Windows, : on Unix)
         String classpath = String.join(File.pathSeparator, classpathEntries);
         
         // Log the classpath for debugging
-        LOG.info("Built classpath for compilation: " + classpath);
+        LOG.info("Built classpath for compilation (" + classpathEntries.size() + " entries): " + classpath);
         
         return classpath;
     }
