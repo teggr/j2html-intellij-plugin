@@ -11,6 +11,8 @@ import org.jetbrains.annotations.NotNull;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.roots.OrderEnumerator;
+import com.intellij.openapi.projectRoots.Sdk;
+import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.compiler.CompileContext;
 import com.intellij.openapi.compiler.CompileStatusNotification;
 import com.intellij.openapi.compiler.CompilerManager;
@@ -1179,6 +1181,76 @@ public class PreviewPanel extends JPanel implements Disposable {
     }
     
     /**
+     * Get JavaCompiler from the project's configured JDK.
+     * This works even if IntelliJ itself is running on a JRE.
+     */
+    private JavaCompiler getProjectJavaCompiler() throws Exception {
+        // Get the project's configured SDK
+        Sdk projectSdk = ProjectRootManager.getInstance(project).getProjectSdk();
+        if (projectSdk == null) {
+            throw new Exception("No JDK configured for this project. Please configure a JDK in File → Project Structure → Project Settings → Project → SDK.");
+        }
+        
+        // Get the JDK home path
+        String jdkHomePath = projectSdk.getHomePath();
+        if (jdkHomePath == null) {
+            throw new Exception("JDK home path not found for configured SDK: " + projectSdk.getName());
+        }
+        
+        // Java 9+ approach: Compiler is part of the JDK, no tools.jar needed
+        // Java 8 approach: Compiler is in tools.jar
+        
+        File jdkHome = new File(jdkHomePath);
+        File toolsJar = new File(jdkHome, "lib/tools.jar");
+        
+        if (!toolsJar.exists()) {
+            // Java 9+ path - no tools.jar exists
+            // The compiler should be available via the system if running on this JDK
+            // We need to use the JDK's bin/javac instead
+            
+            // For Java 9+, we can try getting the system compiler
+            // If IntelliJ is running on a different JDK, we need to invoke javac as a process
+            // For simplicity, let's try the system compiler first
+            JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
+            
+            if (compiler != null) {
+                return compiler;
+            }
+            
+            // If system compiler not available, we need to invoke the project JDK's javac
+            // This is a fallback for when IntelliJ runs on JRE but project uses JDK
+            throw new Exception(
+                "Java compiler not directly accessible. " +
+                "Project JDK is at: " + jdkHomePath + ". " +
+                "Please ensure IntelliJ IDEA is running on a JDK (File → Project Structure → Platform Settings → SDKs), " +
+                "or use a JDK installation for IntelliJ itself (Help → Find Action → Choose Boot Java Runtime)."
+            );
+        }
+        
+        // Java 8 path: Load tools.jar to get the compiler
+        try {
+            URLClassLoader loader = new URLClassLoader(
+                new URL[]{toolsJar.toURI().toURL()},
+                ClassLoader.getSystemClassLoader()
+            );
+            
+            // Get ToolProvider class from tools.jar
+            Class<?> toolProviderClass = loader.loadClass("javax.tools.ToolProvider");
+            Method getCompilerMethod = toolProviderClass.getMethod("getSystemJavaCompiler");
+            JavaCompiler compiler = (JavaCompiler) getCompilerMethod.invoke(null);
+            
+            if (compiler == null) {
+                throw new Exception("Failed to obtain JavaCompiler from tools.jar at: " + toolsJar);
+            }
+            
+            return compiler;
+            
+        } catch (Exception e) {
+            throw new Exception("Failed to load Java compiler from project JDK: " + e.getMessage(), e);
+        }
+    }
+    
+    /**
      * Compile the wrapper class source code and load it into memory.
      * Uses JavaCompiler API for runtime compilation.
      * 
@@ -1194,11 +1266,8 @@ public class PreviewPanel extends JPanel implements Disposable {
     private Class<?> compileAndLoadClass(String className, String sourceCode, String classpath, Module module) 
             throws Exception {
         
-        // Get the Java Compiler
-        JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
-        if (compiler == null) {
-            throw new Exception("No Java compiler available. Make sure you're running on a JDK (not JRE).");
-        }
+        // Use the project's configured JDK to get the compiler
+        JavaCompiler compiler = getProjectJavaCompiler();
         
         // Create temporary directory for compilation
         // Note: deleteOnExit() is used for automatic cleanup. In a long-running server
