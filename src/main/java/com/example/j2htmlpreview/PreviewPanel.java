@@ -105,6 +105,7 @@ public class PreviewPanel extends JPanel implements Disposable {
         // Create compact execute button with play icon
         JButton executeButton = new JButton("▶");
         executeButton.setToolTipText("Compile and Preview");
+        executeButton.getAccessibleContext().setAccessibleDescription("Compile and preview the j2html expression");
         executeButton.setPreferredSize(new Dimension(45, 25));
         executeButton.addActionListener(e -> executeExpression());
         
@@ -836,8 +837,6 @@ public class PreviewPanel extends JPanel implements Disposable {
                 return editor;
             }
         };
-        
-        textField.setOneLineMode(true);  // Single line
         
         return textField;
     }
