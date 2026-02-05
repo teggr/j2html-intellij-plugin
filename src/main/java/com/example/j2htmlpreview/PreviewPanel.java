@@ -55,7 +55,6 @@ public class PreviewPanel extends JPanel implements Disposable {
     private static final long COMPILATION_THROTTLE_MS = 2500; // Minimum interval between compilations
     
     private final Project project;
-    private final JLabel currentFileLabel;
     private final JComboBox<String> methodSelector;
     private final JEditorPane htmlPreview;
     private final List<PsiMethod> j2htmlMethods = new ArrayList<>();
@@ -65,6 +64,7 @@ public class PreviewPanel extends JPanel implements Disposable {
     private EditorTextField expressionEditor;
     private PsiExpressionCodeFragment currentFragment;
     private PsiMethod currentMethod;
+    private JPanel evaluatorPanel;
     
     // Fix for multiple recompilations issue
     private boolean isUpdatingMethodSelector = false; // Prevents ActionListener during programmatic updates
@@ -76,15 +76,9 @@ public class PreviewPanel extends JPanel implements Disposable {
         this.psiChangeAlarm = new Alarm(Alarm.ThreadToUse.SWING_THREAD, this);
         setLayout(new BorderLayout());
         
-        // Header panel
+        // Header panel - just the method selector
         JPanel headerPanel = new JPanel(new BorderLayout());
         headerPanel.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
-        
-        JLabel titleLabel = new JLabel("j2html Preview - Phase 5");
-        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 14f));
-        
-        currentFileLabel = new JLabel("No file selected");
-        currentFileLabel.setFont(currentFileLabel.getFont().deriveFont(Font.ITALIC));
         
         // Method selector dropdown
         methodSelector = new JComboBox<>();
@@ -95,37 +89,37 @@ public class PreviewPanel extends JPanel implements Disposable {
             }
         });
         
-        JPanel selectorPanel = new JPanel(new BorderLayout());
-        selectorPanel.add(new JLabel("Select method: "), BorderLayout.WEST);
+        JPanel selectorPanel = new JPanel(new BorderLayout(5, 0));
+        selectorPanel.add(new JLabel("Select method:"), BorderLayout.WEST);
         selectorPanel.add(methodSelector, BorderLayout.CENTER);
-        selectorPanel.setBorder(BorderFactory.createEmptyBorder(5, 0, 5, 0));
         
-        headerPanel.add(titleLabel, BorderLayout.NORTH);
-        headerPanel.add(currentFileLabel, BorderLayout.CENTER);
-        headerPanel.add(selectorPanel, BorderLayout.SOUTH);
+        headerPanel.add(selectorPanel, BorderLayout.NORTH);
         
-        // Phase 5: Expression evaluator panel
-        JPanel evaluatorPanel = new JPanel(new BorderLayout());
-        evaluatorPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        // Expression evaluator panel - compact single line
+        evaluatorPanel = new JPanel(new BorderLayout(5, 0));
+        evaluatorPanel.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
         
-        JLabel evaluatorLabel = new JLabel("Quick test (write method call):");
-        evaluatorLabel.setFont(evaluatorLabel.getFont().deriveFont(Font.BOLD));
-        
-        // Create the expression editor (initially empty)
+        // Create single-line expression editor
         expressionEditor = createExpressionEditor();
-        expressionEditor.setPreferredSize(new Dimension(400, 100));
         
-        JButton executeButton = new JButton("Compile and Preview");
+        // Create compact execute button with play icon
+        JButton executeButton = new JButton("▶");
+        executeButton.setToolTipText("Compile and Preview");
+        executeButton.getAccessibleContext().setAccessibleDescription("Compile and preview the j2html expression");
+        executeButton.setPreferredSize(new Dimension(45, 25));
         executeButton.addActionListener(e -> executeExpression());
         
-        evaluatorPanel.add(evaluatorLabel, BorderLayout.NORTH);
         evaluatorPanel.add(expressionEditor, BorderLayout.CENTER);
-        evaluatorPanel.add(executeButton, BorderLayout.SOUTH);
+        evaluatorPanel.add(executeButton, BorderLayout.EAST);
         
-        // Update main panel layout
-        JPanel topPanel = new JPanel(new BorderLayout());
-        topPanel.add(headerPanel, BorderLayout.NORTH);
-        topPanel.add(evaluatorPanel, BorderLayout.CENTER);
+        // Initially hidden - only show for parameterized methods
+        evaluatorPanel.setVisible(false);
+        
+        // Assemble main layout
+        JPanel topPanel = new JPanel();
+        topPanel.setLayout(new BoxLayout(topPanel, BoxLayout.Y_AXIS));
+        topPanel.add(headerPanel);
+        topPanel.add(evaluatorPanel);
         
         // HTML preview area
         htmlPreview = new JEditorPane("text/html", getInitialHtml());
@@ -195,11 +189,9 @@ public class PreviewPanel extends JPanel implements Disposable {
         
         if (selectedFile != null) {
             currentVirtualFile = selectedFile;  // Track current file
-            currentFileLabel.setText("Current file: " + selectedFile.getName());
             analyzeFile(selectedFile);
         } else {
             currentVirtualFile = null;  // Clear tracked file
-            currentFileLabel.setText("No file selected");
             j2htmlMethods.clear();
             updateMethodSelector();
             htmlPreview.setText(getInitialHtml());
@@ -340,11 +332,6 @@ public class PreviewPanel extends JPanel implements Disposable {
     
     /**
      * Called when user selects a method from the dropdown.
-     * Phase 5: Handles parameterized methods by populating expression editor.
-     * Fixed: No longer auto-executes zero-parameter methods to prevent unwanted compilations.
-     * 
-     * Note: This method is only called for user-initiated selections, not during
-     * programmatic updates (protected by isUpdatingMethodSelector flag in ActionListener).
      */
     private void onMethodSelected() {
         int selectedIndex = methodSelector.getSelectedIndex();
@@ -352,14 +339,14 @@ public class PreviewPanel extends JPanel implements Disposable {
             PsiMethod selectedMethod = j2htmlMethods.get(selectedIndex);
             currentMethod = selectedMethod;
             
-            // For zero-parameter methods, populate the expression editor but don't auto-execute
             if (selectedMethod.getParameterList().getParametersCount() == 0) {
-                populateExpressionEditor(selectedMethod);
-                showInfo("Zero-parameter method selected. Click 'Compile and Preview' to execute.");
+                // Zero parameters - execute immediately, hide editor
+                evaluatorPanel.setVisible(false);
+                compileAndExecute(selectedMethod);
             } else {
-                // For methods with parameters, populate the expression editor
+                // Has parameters - show editor with template
+                evaluatorPanel.setVisible(true);
                 populateExpressionEditor(selectedMethod);
-                showInfo("Method has parameters. Write the method call in the editor above and click 'Compile and Preview'.");
             }
         }
     }
@@ -587,61 +574,16 @@ public class PreviewPanel extends JPanel implements Disposable {
     }
     
     /**
-     * Display the rendered HTML in the preview pane with success styling.
+     * Display the rendered HTML in the preview pane.
+     * Just the raw HTML, no wrapper or success banners.
      */
     private void displayRenderedHtml(String renderedHtml, String methodName) {
-        String wrappedHtml = """
-            <html>
-            <head>
-                <style>
-                    body { 
-                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                        padding: 20px;
-                        line-height: 1.6;
-                    }
-                    .success-banner {
-                        background: #d4edda;
-                        border: 1px solid #c3e6cb;
-                        border-radius: 8px;
-                        padding: 12px;
-                        margin-bottom: 20px;
-                        color: #155724;
-                    }
-                    .rendered-output {
-                        border: 2px solid #007bff;
-                        border-radius: 8px;
-                        padding: 20px;
-                        background: white;
-                        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-                    }
-                    .method-info {
-                        background: #f8f9fa;
-                        border-left: 4px solid #007bff;
-                        padding: 10px;
-                        margin-bottom: 15px;
-                        font-family: 'Courier New', monospace;
-                    }
-                </style>
-            </head>
-            <body>
-                <div class="success-banner">
-                    ✓ <strong>Phase 4 Success!</strong> Method executed and HTML rendered.
-                </div>
-                <div class="method-info">
-                    Rendered output from: <strong>%s()</strong>
-                </div>
-                <div class="rendered-output">
-                    %s
-                </div>
-            </body>
-            </html>
-            """.formatted(methodName, renderedHtml);
-        
-        htmlPreview.setText(wrappedHtml);
+        htmlPreview.setText(renderedHtml);
     }
     
     /**
      * Display an error message in the preview pane.
+     * Minimal styling, just the error text.
      */
     private void showError(String errorMessage) {
         String errorHtml = """
@@ -650,33 +592,17 @@ public class PreviewPanel extends JPanel implements Disposable {
                 <style>
                     body { 
                         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                        padding: 20px;
-                        line-height: 1.6;
-                    }
-                    .error {
+                        padding: 10px;
+                        color: #721c24;
                         background: #f8d7da;
                         border: 1px solid #f5c6cb;
-                        border-radius: 8px;
-                        padding: 16px;
-                        color: #721c24;
-                    }
-                    .error h3 {
-                        margin-top: 0;
-                        color: #721c24;
-                    }
-                    code {
-                        background: #fff;
-                        padding: 2px 6px;
-                        border-radius: 3px;
-                        font-family: 'Courier New', monospace;
+                        border-radius: 4px;
+                        margin: 0;
                     }
                 </style>
             </head>
-            <body>
-                <div class="error">
-                    <h3>⚠ Execution Error</h3>
-                    <p><code>%s</code></p>
-                </div>
+            <body role="alert" aria-live="assertive">
+                <span aria-hidden="true">⚠</span> %s
             </body>
             </html>
             """.formatted(errorMessage);
@@ -685,8 +611,7 @@ public class PreviewPanel extends JPanel implements Disposable {
     }
     
     /**
-     * Display an informational/status message in the preview pane.
-     * Used for transient states like "Compiling..."
+     * Display an informational message in the preview pane.
      */
     private void showInfo(String message) {
         String infoHtml = """
@@ -695,33 +620,17 @@ public class PreviewPanel extends JPanel implements Disposable {
                 <style>
                     body { 
                         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                        padding: 20px;
-                        line-height: 1.6;
-                    }
-                    .info {
+                        padding: 10px;
+                        color: #004085;
                         background: #cce5ff;
                         border: 1px solid #b8daff;
-                        border-radius: 8px;
-                        padding: 16px;
-                        color: #004085;
-                    }
-                    .info h3 {
-                        margin-top: 0;
-                        color: #004085;
-                    }
-                    code {
-                        background: #fff;
-                        padding: 2px 6px;
-                        border-radius: 3px;
-                        font-family: 'Courier New', monospace;
+                        border-radius: 4px;
+                        margin: 0;
                     }
                 </style>
             </head>
-            <body>
-                <div class="info">
-                    <h3>ℹ Status</h3>
-                    <p><code>%s</code></p>
-                </div>
+            <body role="status" aria-live="polite">
+                <span aria-hidden="true">ℹ</span> %s
             </body>
             </html>
             """.formatted(message);
@@ -912,26 +821,26 @@ public class PreviewPanel extends JPanel implements Disposable {
     }
     
     /**
-     * Create an EditorTextField for writing Java expressions.
-     * This gives us a mini code editor with syntax highlighting and autocomplete.
+     * Create a single-line EditorTextField for writing Java expressions.
+     * Similar to debugger's "Evaluate Expression" input.
      */
     private EditorTextField createExpressionEditor() {
-        // Start with empty document
         Document document = EditorFactory.getInstance().createDocument("");
         
-        // Create editor text field with Java file type for syntax highlighting
         EditorTextField textField = new EditorTextField(document, project, JavaFileType.INSTANCE) {
             @Override
             protected EditorEx createEditor() {
                 EditorEx editor = super.createEditor();
-                // Enable soft wrapping for better multi-line editing
-                editor.getSettings().setUseSoftWraps(true);
+                // Configure single-line mode at the editor level
+                editor.getSettings().setUseSoftWraps(false);
+                editor.setOneLineMode(true);
                 return editor;
             }
         };
         
-        // Not one-line (allow multi-line expressions)
-        textField.setOneLineMode(false);
+        // Also set one-line mode at the text field level for complete consistency
+        // This ensures the mode is enforced both when the editor is created and at the field level
+        textField.setOneLineMode(true);
         
         return textField;
     }
