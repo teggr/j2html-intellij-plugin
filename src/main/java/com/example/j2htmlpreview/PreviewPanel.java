@@ -135,14 +135,12 @@ public class PreviewPanel extends JPanel implements Disposable {
             webViewComponent.loadHTML(welcomePage);
             displayArea = webViewComponent.getComponent();
         } else {
-            legacyHtmlPane = new JEditorPane();
-            legacyHtmlPane.setContentType("text/html");
-            legacyHtmlPane.setEditable(false);
-            String fallbackMsg = "<html><body style='padding:15px;font-family:Arial;'>" +
+            String unavailableNote = "<html><body style='padding:15px;font-family:Arial;'>" +
                                  "<h2 style='color:#d9534f;'>Browser Not Available</h2>" +
                                  "<p>JCEF (Chromium Embedded Framework) is not supported.</p>" +
                                  "<p>Bootstrap features will be unavailable in this session.</p></body></html>";
-            legacyHtmlPane.setText(fallbackMsg);
+            legacyHtmlPane = new JEditorPane("text/html", unavailableNote);
+            legacyHtmlPane.setEditable(false);
             displayArea = legacyHtmlPane;
         }
         
@@ -601,47 +599,41 @@ public class PreviewPanel extends JPanel implements Disposable {
     }
     
     private void showError(String errorMessage) {
+        String sanitizedMsg = escapeHtmlEntities(errorMessage);
         if (hasModernBrowserSupport) {
-            String bootstrapAlert = String.format(
+            String bootstrapAlert = 
                 "<div class='alert alert-danger shadow-sm' role='alert'>" +
                 "<div class='d-flex align-items-center'>" +
                 "<span class='fs-3 me-3'>⚠️</span>" +
-                "<div><strong>Error Occurred</strong><hr class='my-2'/><p class='mb-0'>%s</p></div>" +
-                "</div></div>",
-                errorMessage
-            );
+                "<div><strong>Error Occurred</strong><hr class='my-2'/><p class='mb-0'>" + 
+                sanitizedMsg + "</p></div></div></div>";
             webViewComponent.loadHTML(constructBootstrapPage(bootstrapAlert));
         } else {
-            String basicError = String.format(
+            String basicError = 
                 "<html><head><style>" +
                 "body{font-family:Arial,sans-serif;padding:12px;margin:0;" +
                 "background-color:#f8d7da;color:#721c24;border:2px solid #f5c6cb;}" +
-                "</style></head><body><strong>⚠️ Error:</strong> %s</body></html>",
-                errorMessage
-            );
+                "</style></head><body><strong>⚠️ Error:</strong> " + sanitizedMsg + "</body></html>";
             legacyHtmlPane.setText(basicError);
         }
     }
     
     private void showInfo(String message) {
+        String sanitizedMsg = escapeHtmlEntities(message);
         if (hasModernBrowserSupport) {
-            String bootstrapAlert = String.format(
+            String bootstrapAlert = 
                 "<div class='alert alert-info shadow-sm' role='status'>" +
                 "<div class='d-flex align-items-center'>" +
                 "<span class='fs-3 me-3'>ℹ️</span>" +
-                "<div><strong>Information</strong><hr class='my-2'/><p class='mb-0'>%s</p></div>" +
-                "</div></div>",
-                message
-            );
+                "<div><strong>Information</strong><hr class='my-2'/><p class='mb-0'>" + 
+                sanitizedMsg + "</p></div></div></div>";
             webViewComponent.loadHTML(constructBootstrapPage(bootstrapAlert));
         } else {
-            String basicInfo = String.format(
+            String basicInfo = 
                 "<html><head><style>" +
                 "body{font-family:Arial,sans-serif;padding:12px;margin:0;" +
                 "background-color:#d1ecf1;color:#0c5460;border:2px solid #bee5eb;}" +
-                "</style></head><body><strong>ℹ️ Info:</strong> %s</body></html>",
-                message
-            );
+                "</style></head><body><strong>ℹ️ Info:</strong> " + sanitizedMsg + "</body></html>";
             legacyHtmlPane.setText(basicInfo);
         }
     }
@@ -1504,5 +1496,26 @@ public class PreviewPanel extends JPanel implements Disposable {
         pageBuilder.append("</html>");
         
         return pageBuilder.toString();
+    }
+    
+    private String escapeHtmlEntities(String rawText) {
+        if (rawText == null) {
+            return "";
+        }
+        char[] textChars = rawText.toCharArray();
+        StringBuilder escapedBuilder = new StringBuilder(rawText.length() + 50);
+        
+        for (char ch : textChars) {
+            switch (ch) {
+                case '<': escapedBuilder.append("&lt;"); break;
+                case '>': escapedBuilder.append("&gt;"); break;
+                case '&': escapedBuilder.append("&amp;"); break;
+                case '"': escapedBuilder.append("&quot;"); break;
+                case '\'': escapedBuilder.append("&#39;"); break;
+                default: escapedBuilder.append(ch);
+            }
+        }
+        
+        return escapedBuilder.toString();
     }
 }
