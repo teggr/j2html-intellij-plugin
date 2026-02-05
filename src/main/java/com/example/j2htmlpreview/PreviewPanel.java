@@ -838,6 +838,9 @@ public class PreviewPanel extends JPanel implements Disposable {
             }
         };
         
+        // Set one-line mode on the textField as well for consistency
+        textField.setOneLineMode(true);
+        
         return textField;
     }
     
