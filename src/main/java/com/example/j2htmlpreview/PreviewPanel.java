@@ -103,6 +103,7 @@ public class PreviewPanel extends JPanel implements Disposable {
         expressionEditor = createExpressionEditor();
         
         // Create compact execute button with play icon
+        // Note: Using Unicode ▶ for simplicity. Consider AllIcons.Actions.Execute for production
         JButton executeButton = new JButton("▶");
         executeButton.setToolTipText("Compile and Preview");
         executeButton.getAccessibleContext().setAccessibleDescription("Compile and preview the j2html expression");
@@ -601,8 +602,8 @@ public class PreviewPanel extends JPanel implements Disposable {
                     }
                 </style>
             </head>
-            <body>
-                ⚠ %s
+            <body role="alert" aria-live="assertive">
+                <span aria-label="Warning">⚠</span> %s
             </body>
             </html>
             """.formatted(errorMessage);
@@ -629,8 +630,8 @@ public class PreviewPanel extends JPanel implements Disposable {
                     }
                 </style>
             </head>
-            <body>
-                ℹ %s
+            <body role="status" aria-live="polite">
+                <span aria-label="Information">ℹ</span> %s
             </body>
             </html>
             """.formatted(message);
