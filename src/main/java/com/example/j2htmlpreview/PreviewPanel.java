@@ -103,7 +103,6 @@ public class PreviewPanel extends JPanel implements Disposable {
         expressionEditor = createExpressionEditor();
         
         // Create compact execute button with play icon
-        // Note: Using Unicode ▶ for simplicity. Consider AllIcons.Actions.Execute for production
         JButton executeButton = new JButton("▶");
         executeButton.setToolTipText("Compile and Preview");
         executeButton.getAccessibleContext().setAccessibleDescription("Compile and preview the j2html expression");
@@ -603,7 +602,7 @@ public class PreviewPanel extends JPanel implements Disposable {
                 </style>
             </head>
             <body role="alert" aria-live="assertive">
-                <span aria-label="Warning">⚠</span> %s
+                <span aria-hidden="true">⚠</span> %s
             </body>
             </html>
             """.formatted(errorMessage);
@@ -631,7 +630,7 @@ public class PreviewPanel extends JPanel implements Disposable {
                 </style>
             </head>
             <body role="status" aria-live="polite">
-                <span aria-label="Information">ℹ</span> %s
+                <span aria-hidden="true">ℹ</span> %s
             </body>
             </html>
             """.formatted(message);
@@ -832,14 +831,15 @@ public class PreviewPanel extends JPanel implements Disposable {
             @Override
             protected EditorEx createEditor() {
                 EditorEx editor = super.createEditor();
-                // Single line mode - no soft wrapping
+                // Configure single-line mode at the editor level
                 editor.getSettings().setUseSoftWraps(false);
                 editor.setOneLineMode(true);
                 return editor;
             }
         };
         
-        // Set one-line mode on the textField as well for consistency
+        // Also set one-line mode at the text field level for complete consistency
+        // This ensures the mode is enforced both when the editor is created and at the field level
         textField.setOneLineMode(true);
         
         return textField;
