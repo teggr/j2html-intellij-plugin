@@ -25,6 +25,8 @@ import com.intellij.ide.highlighter.JavaFileType;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.util.Alarm;
+import com.intellij.ui.jcef.JBCefApp;
+import com.intellij.ui.jcef.JBCefBrowser;
 
 import javax.swing.*;
 import javax.tools.*;
@@ -56,7 +58,9 @@ public class PreviewPanel extends JPanel implements Disposable {
     
     private final Project project;
     private final JComboBox<String> methodSelector;
-    private final JEditorPane htmlPreview;
+    private JBCefBrowser webViewComponent;
+    private JEditorPane legacyHtmlPane;
+    private boolean hasModernBrowserSupport;
     private final List<PsiMethod> j2htmlMethods = new ArrayList<>();
     private VirtualFile currentVirtualFile = null;
     
@@ -121,10 +125,28 @@ public class PreviewPanel extends JPanel implements Disposable {
         topPanel.add(headerPanel);
         topPanel.add(evaluatorPanel);
         
-        // HTML preview area
-        htmlPreview = new JEditorPane("text/html", getInitialHtml());
-        htmlPreview.setEditable(false);
-        JScrollPane scrollPane = new JScrollPane(htmlPreview);
+        // Detect modern browser availability
+        hasModernBrowserSupport = JBCefApp.isSupported();
+        JComponent displayArea;
+        
+        if (hasModernBrowserSupport) {
+            webViewComponent = new JBCefBrowser();
+            String welcomePage = constructBootstrapPage(getInitialHtml());
+            webViewComponent.loadHTML(welcomePage);
+            displayArea = webViewComponent.getComponent();
+        } else {
+            legacyHtmlPane = new JEditorPane();
+            legacyHtmlPane.setContentType("text/html");
+            legacyHtmlPane.setEditable(false);
+            String fallbackMsg = "<html><body style='padding:15px;font-family:Arial;'>" +
+                                 "<h2 style='color:#d9534f;'>Browser Not Available</h2>" +
+                                 "<p>JCEF (Chromium Embedded Framework) is not supported.</p>" +
+                                 "<p>Bootstrap features will be unavailable in this session.</p></body></html>";
+            legacyHtmlPane.setText(fallbackMsg);
+            displayArea = legacyHtmlPane;
+        }
+        
+        JScrollPane scrollPane = new JScrollPane(displayArea);
         
         add(topPanel, BorderLayout.NORTH);
         add(scrollPane, BorderLayout.CENTER);
@@ -139,9 +161,10 @@ public class PreviewPanel extends JPanel implements Disposable {
     
     @Override
     public void dispose() {
-        // Cancel any pending debounced tasks
         psiChangeAlarm.cancelAllRequests();
-        // Cleanup is handled automatically by registering listeners with this Disposable
+        if (webViewComponent != null) {
+            webViewComponent.dispose();
+        }
     }
     
     private void setupFileListener() {
@@ -188,13 +211,13 @@ public class PreviewPanel extends JPanel implements Disposable {
             : null;
         
         if (selectedFile != null) {
-            currentVirtualFile = selectedFile;  // Track current file
+            currentVirtualFile = selectedFile;
             analyzeFile(selectedFile);
         } else {
-            currentVirtualFile = null;  // Clear tracked file
+            currentVirtualFile = null;
             j2htmlMethods.clear();
             updateMethodSelector();
-            htmlPreview.setText(getInitialHtml());
+            renderToView(getInitialHtml());
         }
     }
     
@@ -210,7 +233,7 @@ public class PreviewPanel extends JPanel implements Disposable {
         
         // Check if it's a Java file
         if (!(psiFile instanceof PsiJavaFile)) {
-            htmlPreview.setText(getNotJavaFileHtml());
+            renderToView(getNotJavaFileHtml());
             updateMethodSelector();
             return;
         }
@@ -234,9 +257,9 @@ public class PreviewPanel extends JPanel implements Disposable {
         updateMethodSelector();
         
         if (j2htmlMethods.isEmpty()) {
-            htmlPreview.setText(getNoMethodsFoundHtml());
+            renderToView(getNoMethodsFoundHtml());
         } else {
-            htmlPreview.setText(getMethodsFoundHtml());
+            renderToView(getMethodsFoundHtml());
         }
     }
     
@@ -573,69 +596,54 @@ public class PreviewPanel extends JPanel implements Disposable {
         return (String) result;
     }
     
-    /**
-     * Display the rendered HTML in the preview pane.
-     * Just the raw HTML, no wrapper or success banners.
-     */
     private void displayRenderedHtml(String renderedHtml, String methodName) {
-        htmlPreview.setText(renderedHtml);
+        renderToView(renderedHtml);
     }
     
-    /**
-     * Display an error message in the preview pane.
-     * Minimal styling, just the error text.
-     */
     private void showError(String errorMessage) {
-        String errorHtml = """
-            <html>
-            <head>
-                <style>
-                    body { 
-                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                        padding: 10px;
-                        color: #721c24;
-                        background: #f8d7da;
-                        border: 1px solid #f5c6cb;
-                        border-radius: 4px;
-                        margin: 0;
-                    }
-                </style>
-            </head>
-            <body role="alert" aria-live="assertive">
-                <span aria-hidden="true">⚠</span> %s
-            </body>
-            </html>
-            """.formatted(errorMessage);
-        
-        htmlPreview.setText(errorHtml);
+        if (hasModernBrowserSupport) {
+            String bootstrapAlert = String.format(
+                "<div class='alert alert-danger shadow-sm' role='alert'>" +
+                "<div class='d-flex align-items-center'>" +
+                "<span class='fs-3 me-3'>⚠️</span>" +
+                "<div><strong>Error Occurred</strong><hr class='my-2'/><p class='mb-0'>%s</p></div>" +
+                "</div></div>",
+                errorMessage
+            );
+            webViewComponent.loadHTML(constructBootstrapPage(bootstrapAlert));
+        } else {
+            String basicError = String.format(
+                "<html><head><style>" +
+                "body{font-family:Arial,sans-serif;padding:12px;margin:0;" +
+                "background-color:#f8d7da;color:#721c24;border:2px solid #f5c6cb;}" +
+                "</style></head><body><strong>⚠️ Error:</strong> %s</body></html>",
+                errorMessage
+            );
+            legacyHtmlPane.setText(basicError);
+        }
     }
     
-    /**
-     * Display an informational message in the preview pane.
-     */
     private void showInfo(String message) {
-        String infoHtml = """
-            <html>
-            <head>
-                <style>
-                    body { 
-                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                        padding: 10px;
-                        color: #004085;
-                        background: #cce5ff;
-                        border: 1px solid #b8daff;
-                        border-radius: 4px;
-                        margin: 0;
-                    }
-                </style>
-            </head>
-            <body role="status" aria-live="polite">
-                <span aria-hidden="true">ℹ</span> %s
-            </body>
-            </html>
-            """.formatted(message);
-
-        htmlPreview.setText(infoHtml);
+        if (hasModernBrowserSupport) {
+            String bootstrapAlert = String.format(
+                "<div class='alert alert-info shadow-sm' role='status'>" +
+                "<div class='d-flex align-items-center'>" +
+                "<span class='fs-3 me-3'>ℹ️</span>" +
+                "<div><strong>Information</strong><hr class='my-2'/><p class='mb-0'>%s</p></div>" +
+                "</div></div>",
+                message
+            );
+            webViewComponent.loadHTML(constructBootstrapPage(bootstrapAlert));
+        } else {
+            String basicInfo = String.format(
+                "<html><head><style>" +
+                "body{font-family:Arial,sans-serif;padding:12px;margin:0;" +
+                "background-color:#d1ecf1;color:#0c5460;border:2px solid #bee5eb;}" +
+                "</style></head><body><strong>ℹ️ Info:</strong> %s</body></html>",
+                message
+            );
+            legacyHtmlPane.setText(basicInfo);
+        }
     }
     
     private String getMethodSelectedHtml(PsiMethod method) {
@@ -1456,5 +1464,45 @@ public class PreviewPanel extends JPanel implements Disposable {
         // Full class name includes package if present
         String fullClassName = packagePath.isEmpty() ? className : packagePath.replace('/', '.') + '.' + className;
         return classLoader.loadClass(fullClassName);
+    }
+    
+    private void renderToView(String htmlContent) {
+        if (hasModernBrowserSupport) {
+            webViewComponent.loadHTML(constructBootstrapPage(htmlContent));
+        } else {
+            legacyHtmlPane.setText(htmlContent);
+        }
+    }
+    
+    private String constructBootstrapPage(String bodyContent) {
+        StringBuilder pageBuilder = new StringBuilder();
+        pageBuilder.append("<!DOCTYPE html>\n");
+        pageBuilder.append("<html lang='en'>\n");
+        pageBuilder.append("<head>\n");
+        pageBuilder.append("<meta charset='UTF-8'>\n");
+        pageBuilder.append("<meta name='viewport' content='width=device-width, initial-scale=1'>\n");
+        pageBuilder.append("<title>j2html Preview</title>\n");
+        
+        // Bootstrap CSS from jsDelivr CDN
+        pageBuilder.append("<link href='https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css' ");
+        pageBuilder.append("rel='stylesheet' ");
+        pageBuilder.append("integrity='sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH' ");
+        pageBuilder.append("crossorigin='anonymous'>\n");
+        
+        pageBuilder.append("</head>\n");
+        pageBuilder.append("<body>\n");
+        pageBuilder.append("<div class='container-fluid p-3'>\n");
+        pageBuilder.append(bodyContent);
+        pageBuilder.append("\n</div>\n");
+        
+        // Bootstrap JS bundle from jsDelivr CDN
+        pageBuilder.append("<script src='https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js' ");
+        pageBuilder.append("integrity='sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz' ");
+        pageBuilder.append("crossorigin='anonymous'></script>\n");
+        
+        pageBuilder.append("</body>\n");
+        pageBuilder.append("</html>");
+        
+        return pageBuilder.toString();
     }
 }
