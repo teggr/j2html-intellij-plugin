@@ -26,7 +26,7 @@ This guide provides step-by-step instructions for testing the new @Preview annot
 
 ### Start the Plugin
 ```bash
-cd /home/runner/work/j2html-intellij-plugin/j2html-intellij-plugin
+cd <project-root>
 ./gradlew runIde
 ```
 
