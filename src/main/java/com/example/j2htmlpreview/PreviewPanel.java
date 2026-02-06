@@ -31,6 +31,8 @@ import com.intellij.ui.jcef.JBCefBrowser;
 import javax.swing.*;
 import javax.tools.*;
 import java.awt.*;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 import java.io.File;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -134,6 +136,26 @@ public class PreviewPanel extends JPanel implements Disposable {
             String welcomePage = constructBootstrapPage(getInitialHtml());
             webViewComponent.loadHTML(welcomePage);
             displayArea = webViewComponent.getComponent();
+
+            // Set initial size for the browser component
+            displayArea.setPreferredSize(new Dimension(800, 600));
+
+            // Handle resize events to update browser viewport
+            // JCEF requires the Canvas component to be properly sized for correct rendering
+            displayArea.addComponentListener(new ComponentAdapter() {
+                @Override
+                public void componentResized(ComponentEvent e) {
+                    // Force the browser component to update its size
+                    Component component = e.getComponent();
+                    if (component != null && webViewComponent != null) {
+                        // Ensure the browser knows about the new size
+                        Dimension size = component.getSize();
+                        component.setSize(size);
+                        component.revalidate();
+                        component.repaint();
+                    }
+                }
+            });
         } else {
             String unavailableNote = "<html><body style='padding:15px;font-family:Arial;'>" +
                                  "<h2 style='color:#d9534f;'>Browser Not Available</h2>" +
@@ -145,7 +167,28 @@ public class PreviewPanel extends JPanel implements Disposable {
         }
         
         JScrollPane scrollPane = new JScrollPane(displayArea);
-        
+        scrollPane.setPreferredSize(new Dimension(800, 600)); // Set initial preferred size
+
+        // Handle scroll pane resize to update browser viewport
+        if (hasModernBrowserSupport) {
+            final JComponent finalDisplayArea = displayArea;
+            scrollPane.addComponentListener(new ComponentAdapter() {
+                @Override
+                public void componentResized(ComponentEvent e) {
+                    // Update the display area size when scroll pane is resized
+                    if (finalDisplayArea != null && webViewComponent != null) {
+                        SwingUtilities.invokeLater(() -> {
+                            Dimension viewportSize = scrollPane.getViewport().getExtentSize();
+                            finalDisplayArea.setPreferredSize(viewportSize);
+                            finalDisplayArea.setSize(viewportSize);
+                            finalDisplayArea.revalidate();
+                            finalDisplayArea.repaint();
+                        });
+                    }
+                }
+            });
+        }
+
         add(topPanel, BorderLayout.NORTH);
         add(scrollPane, BorderLayout.CENTER);
         
