@@ -1,5 +1,6 @@
 package com.example.demo;
 
+import com.example.j2htmlpreview.Preview;
 import j2html.tags.ContainerTag;
 import j2html.tags.DomContent;
 import j2html.tags.specialized.DivTag;
@@ -85,6 +86,30 @@ public class ExampleJ2HtmlComponents {
                 p("$" + price),
                 button(inStock ? "Add to Cart" : "Out of Stock")
                     .withCondDisabled(!inStock)
+            );
+    }
+    
+    /**
+     * Preview method with friendly name - should show: "Hello World Example"
+     */
+    @Preview(name = "Hello World Example")
+    public static ContainerTag helloWorldExample() {
+        return div("Hello World from Preview!");
+    }
+    
+    /**
+     * Preview method with friendly name - should show: "Simple Login Form"
+     */
+    @Preview(name = "Simple Login Form")
+    public static DomContent simpleLoginForm() {
+        return form()
+            .withMethod("post")
+            .with(
+                label("Username:"),
+                input().withType("text").withName("username"),
+                label("Password:"),
+                input().withType("password").withName("password"),
+                button("Login")
             );
     }
 }
