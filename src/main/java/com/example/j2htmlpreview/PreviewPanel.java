@@ -383,7 +383,10 @@ public class PreviewPanel extends JPanel implements Disposable {
             if (nameValue != null) {
                 // Remove quotes from string literal
                 String friendlyName = nameValue.getText().replaceAll("^\"|\"$", "");
-                return friendlyName;
+                // Only use friendly name if it's not empty
+                if (!friendlyName.isEmpty()) {
+                    return friendlyName;
+                }
             }
         }
         
