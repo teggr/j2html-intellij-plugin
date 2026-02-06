@@ -371,8 +371,26 @@ public class PreviewPanel extends JPanel implements Disposable {
     
     /**
      * Build a readable method signature for display.
+     * If method has @Preview annotation, use the friendly name instead.
      */
     private String buildMethodSignature(PsiMethod method) {
+        // Check if method has @Preview annotation
+        PsiAnnotation previewAnnotation = method.getAnnotation("com.example.j2htmlpreview.Preview");
+        
+        if (previewAnnotation != null) {
+            // Extract the name attribute value
+            PsiAnnotationMemberValue nameValue = previewAnnotation.findAttributeValue("name");
+            if (nameValue != null) {
+                // Remove quotes from string literal
+                String friendlyName = nameValue.getText().replaceAll("^\"|\"$", "");
+                // Only use friendly name if it's not empty
+                if (!friendlyName.isEmpty()) {
+                    return friendlyName;
+                }
+            }
+        }
+        
+        // Fallback to standard method signature
         StringBuilder sb = new StringBuilder();
         sb.append(method.getName()).append("(");
         
