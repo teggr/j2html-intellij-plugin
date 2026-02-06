@@ -39,7 +39,7 @@ A new method is automatically created in your file:
  * Preview: Alice's Card
  */
 @Preview(name = "Alice's Card")
-public static DivTag userCard_alice() {
+public static DivTag userCard_alice_s_card() {
     return userCard(new User("Alice", "alice@example.com"));
 }
 ```
@@ -217,8 +217,8 @@ The plugin automatically converts your preview name into a valid Java method nam
 |--------------|----------------------|
 | "Alice's Card" | `userCard_alice_s_card` |
 | "User Profile - Dark" | `userCard_user_profile_dark` |
-| "Button @ 100%" | `button_100` |
-| "Product: $99.99" | `product_99_99` |
+| "Button @ 100%" | `button_button_100` |
+| "Product: $99.99" | `productDisplay_product_99_99` |
 
 **Rules:**
 1. Starts with the base method name

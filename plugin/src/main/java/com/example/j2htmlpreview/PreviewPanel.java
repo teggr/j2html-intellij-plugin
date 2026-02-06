@@ -1681,9 +1681,16 @@ public class PreviewPanel extends JPanel implements Disposable {
         // Ensure uniqueness in the class
         PsiClass containingClass = currentMethod.getContainingClass();
         if (containingClass != null) {
+            // Collect all method names once for efficiency
+            Set<String> existingMethodNames = new LinkedHashSet<>();
+            for (PsiMethod method : containingClass.getMethods()) {
+                existingMethodNames.add(method.getName());
+            }
+            
+            // Find unique method name
             String finalMethodName = methodName;
             int counter = 1;
-            while (containingClass.findMethodsByName(finalMethodName, false).length > 0) {
+            while (existingMethodNames.contains(finalMethodName)) {
                 finalMethodName = methodName + counter;
                 counter++;
             }
@@ -1704,8 +1711,9 @@ public class PreviewPanel extends JPanel implements Disposable {
         code.append("     * Preview: ").append(previewName).append("\n");
         code.append("     */\n");
         
-        // Add @Preview annotation
-        code.append("    @Preview(name = \"").append(previewName.replace("\\", "\\\\").replace("\"", "\\\"")).append("\")\n");
+        // Add @Preview annotation (escape backslashes first, then quotes)
+        String escapedName = previewName.replace("\\", "\\\\").replace("\"", "\\\"");
+        code.append("    @Preview(name = \"").append(escapedName).append("\")\n");
         
         // Add method signature
         code.append("    public static ").append(returnTypeName).append(" ").append(methodName).append("() {\n");
