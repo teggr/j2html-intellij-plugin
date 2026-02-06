@@ -1706,27 +1706,27 @@ public class PreviewPanel extends JPanel implements Disposable {
     private String generatePreviewMethod(String previewName, String methodName, String returnTypeName, String expressionText) {
         StringBuilder code = new StringBuilder();
         
-        // Add JavaDoc comment
-        code.append("    /**\n");
-        code.append("     * Preview: ").append(previewName).append("\n");
-        code.append("     */\n");
-        
+        // Add JavaDoc comment (no leading indentation for PSI factory)
+        code.append("/**\n");
+        code.append(" * Preview: ").append(previewName).append("\n");
+        code.append(" */\n");
+
         // Add @Preview annotation (escape backslashes first, then quotes)
         String escapedName = previewName.replace("\\", "\\\\").replace("\"", "\\\"");
-        code.append("    @Preview(name = \"").append(escapedName).append("\")\n");
-        
+        code.append("@Preview(name = \"").append(escapedName).append("\")\n");
+
         // Add method signature
-        code.append("    public static ").append(returnTypeName).append(" ").append(methodName).append("() {\n");
-        
+        code.append("public static ").append(returnTypeName).append(" ").append(methodName).append("() {\n");
+
         // Add method body - return the expression
-        code.append("        return ").append(expressionText);
+        code.append("    return ").append(expressionText);
         if (!expressionText.endsWith(";")) {
             code.append(";");
         }
         code.append("\n");
         
-        code.append("    }\n");
-        
+        code.append("}\n");
+
         return code.toString();
     }
     
