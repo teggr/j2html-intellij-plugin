@@ -181,10 +181,10 @@ The foundation is solid, the code is clean, and the feature is ready for user te
 
 ## Related Documents
 
-- [PHASE5_IMPLEMENTATION.md](./PHASE5_IMPLEMENTATION.md) - Detailed implementation guide
-- [PHASE5_ARCHITECTURE.md](./PHASE5_ARCHITECTURE.md) - Architecture diagrams
-- [PHASE4_COMPLETE.md](./PHASE4_COMPLETE.md) - Previous phase
-- [PreviewPanel.java](./src/main/java/com/example/j2htmlpreview/PreviewPanel.java) - Main implementation
+- [PHASE5_IMPLEMENTATION.md](PHASE5_IMPLEMENTATION.md) - Detailed implementation guide
+- [PHASE5_ARCHITECTURE.md](PHASE5_ARCHITECTURE.md) - Architecture diagrams
+- [PHASE4_COMPLETE.md](PHASE4_COMPLETE.md) - Previous phase
+- [PreviewPanel.java](../../src/main/java/com/example/j2htmlpreview/PreviewPanel.java) - Main implementation
 
 ---
 

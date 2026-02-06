@@ -1,0 +1,1 @@
+Use `docs/agent` to store agent markdown files such as IMPLEMENTATION.md, SUMMARY.md and any other documentation related to the agent's development and implementation process. This will help keep all relevant information organized and easily accessible for future reference.
