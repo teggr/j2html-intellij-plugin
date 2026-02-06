@@ -1642,8 +1642,8 @@ public class PreviewPanel extends JPanel implements Disposable {
         String methodCode = generatePreviewMethod(previewName, methodName, returnTypeName, expressionText);
         
         // Insert the method into the source file
-        com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(() -> {
-            com.intellij.openapi.command.WriteCommandAction.runWriteCommandAction(project, () -> {
+        ApplicationManager.getApplication().invokeLater(() -> {
+            WriteCommandAction.runWriteCommandAction(project, () -> {
                 try {
                     insertPreviewMethod(currentMethod.getContainingClass(), methodCode);
                     showInfo("Preview method '" + methodName + "' created successfully!");
@@ -1705,7 +1705,7 @@ public class PreviewPanel extends JPanel implements Disposable {
         code.append("     */\n");
         
         // Add @Preview annotation
-        code.append("    @Preview(name = \"").append(previewName.replace("\"", "\\\"")).append("\")\n");
+        code.append("    @Preview(name = \"").append(previewName.replace("\\", "\\\\").replace("\"", "\\\"")).append("\")\n");
         
         // Add method signature
         code.append("    public static ").append(returnTypeName).append(" ").append(methodName).append("() {\n");
@@ -1739,8 +1739,7 @@ public class PreviewPanel extends JPanel implements Disposable {
         psiClass.add(newMethod);
         
         // Format the code
-        com.intellij.psi.codeStyle.CodeStyleManager codeStyleManager = 
-            com.intellij.psi.codeStyle.CodeStyleManager.getInstance(project);
+        CodeStyleManager codeStyleManager = CodeStyleManager.getInstance(project);
         codeStyleManager.reformat(newMethod);
     }
 }
