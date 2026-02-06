@@ -7,6 +7,7 @@ import com.intellij.openapi.fileEditor.FileEditorManagerListener;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.*;
+import com.intellij.psi.codeStyle.CodeStyleManager;
 import org.jetbrains.annotations.NotNull;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
@@ -17,6 +18,8 @@ import com.intellij.openapi.compiler.CompileContext;
 import com.intellij.openapi.compiler.CompileStatusNotification;
 import com.intellij.openapi.compiler.CompilerManager;
 import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.EditorFactory;
 import com.intellij.openapi.editor.ex.EditorEx;
@@ -115,8 +118,20 @@ public class PreviewPanel extends JPanel implements Disposable {
         executeButton.setPreferredSize(new Dimension(45, 25));
         executeButton.addActionListener(e -> executeExpression());
         
+        // Create "Save as @Preview" button
+        JButton saveAsPreviewButton = new JButton("💾");
+        saveAsPreviewButton.setToolTipText("Save as @Preview");
+        saveAsPreviewButton.getAccessibleContext().setAccessibleDescription("Generate a @Preview annotated method from this expression");
+        saveAsPreviewButton.setPreferredSize(new Dimension(45, 25));
+        saveAsPreviewButton.addActionListener(e -> saveAsPreview());
+        
+        // Create button panel to hold both buttons
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
+        buttonPanel.add(executeButton);
+        buttonPanel.add(saveAsPreviewButton);
+        
         evaluatorPanel.add(expressionEditor, BorderLayout.CENTER);
-        evaluatorPanel.add(executeButton, BorderLayout.EAST);
+        evaluatorPanel.add(buttonPanel, BorderLayout.EAST);
         
         // Initially hidden - only show for parameterized methods
         evaluatorPanel.setVisible(false);
@@ -1578,5 +1593,161 @@ public class PreviewPanel extends JPanel implements Disposable {
         }
         
         return escapedBuilder.toString();
+    }
+    
+    /**
+     * Phase 5c: Save the current expression as a @Preview annotated method.
+     * Prompts the user for a name and generates the method in the source file.
+     */
+    private void saveAsPreview() {
+        if (currentMethod == null) {
+            showError("No method selected");
+            return;
+        }
+        
+        String expressionText = expressionEditor.getText().trim();
+        if (expressionText.isEmpty()) {
+            showError("Expression is empty");
+            return;
+        }
+        
+        // Prompt user for preview name
+        String previewName = JOptionPane.showInputDialog(
+            this,
+            "Enter a name for this preview:",
+            "Save as @Preview",
+            JOptionPane.QUESTION_MESSAGE
+        );
+        
+        if (previewName == null || previewName.trim().isEmpty()) {
+            // User cancelled or entered empty name
+            return;
+        }
+        
+        previewName = previewName.trim();
+        
+        // Generate method name from preview name
+        String methodName = generateMethodName(previewName);
+        
+        // Get return type from current method
+        PsiType returnType = currentMethod.getReturnType();
+        if (returnType == null) {
+            showError("Cannot determine return type");
+            return;
+        }
+        
+        String returnTypeName = returnType.getPresentableText();
+        
+        // Generate the method code
+        String methodCode = generatePreviewMethod(previewName, methodName, returnTypeName, expressionText);
+        
+        // Insert the method into the source file
+        ApplicationManager.getApplication().invokeLater(() -> {
+            WriteCommandAction.runWriteCommandAction(project, () -> {
+                try {
+                    insertPreviewMethod(currentMethod.getContainingClass(), methodCode);
+                    showInfo("Preview method '" + methodName + "' created successfully!");
+                } catch (Exception e) {
+                    showError("Failed to create preview method: " + e.getMessage());
+                    LOG.error("Failed to create preview method", e);
+                }
+            });
+        });
+    }
+    
+    /**
+     * Generate a valid Java method name from a preview name.
+     * Converts spaces and special characters to underscores, and converts to camelCase.
+     */
+    private String generateMethodName(String previewName) {
+        // Start with the base name from current method
+        String baseName = currentMethod.getName();
+        
+        // Remove common suffixes if present
+        if (baseName.endsWith("Tag")) {
+            baseName = baseName.substring(0, baseName.length() - 3);
+        }
+        
+        // Convert preview name to a valid identifier suffix
+        String suffix = previewName
+            .replaceAll("[^a-zA-Z0-9]", "_")  // Replace non-alphanumeric with underscore
+            .replaceAll("_+", "_")             // Collapse multiple underscores
+            .replaceAll("^_|_$", "")           // Remove leading/trailing underscores
+            .toLowerCase();
+        
+        // Combine base name with suffix
+        String methodName = baseName + "_" + suffix;
+        
+        // Ensure uniqueness in the class
+        PsiClass containingClass = currentMethod.getContainingClass();
+        if (containingClass != null) {
+            // Collect all method names once for efficiency
+            Set<String> existingMethodNames = new LinkedHashSet<>();
+            for (PsiMethod method : containingClass.getMethods()) {
+                existingMethodNames.add(method.getName());
+            }
+            
+            // Find unique method name
+            String finalMethodName = methodName;
+            int counter = 1;
+            while (existingMethodNames.contains(finalMethodName)) {
+                finalMethodName = methodName + counter;
+                counter++;
+            }
+            methodName = finalMethodName;
+        }
+        
+        return methodName;
+    }
+    
+    /**
+     * Generate the complete @Preview annotated method code.
+     */
+    private String generatePreviewMethod(String previewName, String methodName, String returnTypeName, String expressionText) {
+        StringBuilder code = new StringBuilder();
+        
+        // Add JavaDoc comment (no leading indentation for PSI factory)
+        code.append("/**\n");
+        code.append(" * Preview: ").append(previewName).append("\n");
+        code.append(" */\n");
+
+        // Add @Preview annotation (escape backslashes first, then quotes)
+        String escapedName = previewName.replace("\\", "\\\\").replace("\"", "\\\"");
+        code.append("@Preview(name = \"").append(escapedName).append("\")\n");
+
+        // Add method signature
+        code.append("public static ").append(returnTypeName).append(" ").append(methodName).append("() {\n");
+
+        // Add method body - return the expression
+        code.append("    return ").append(expressionText);
+        if (!expressionText.endsWith(";")) {
+            code.append(";");
+        }
+        code.append("\n");
+        
+        code.append("}\n");
+
+        return code.toString();
+    }
+    
+    /**
+     * Insert the generated method into the containing class.
+     * Uses PSI manipulation to add the method at the end of the class.
+     */
+    private void insertPreviewMethod(PsiClass psiClass, String methodCode) {
+        if (psiClass == null) {
+            throw new IllegalArgumentException("Class cannot be null");
+        }
+        
+        // Create a method from the code
+        PsiElementFactory factory = JavaPsiFacade.getElementFactory(project);
+        PsiMethod newMethod = factory.createMethodFromText(methodCode, psiClass);
+        
+        // Add the method to the class
+        psiClass.add(newMethod);
+        
+        // Format the code
+        CodeStyleManager codeStyleManager = CodeStyleManager.getInstance(project);
+        codeStyleManager.reformat(newMethod);
     }
 }
