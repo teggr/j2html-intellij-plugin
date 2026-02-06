@@ -2,14 +2,43 @@
 
 An IntelliJ IDEA plugin for previewing j2html components with live rendering.
 
-## Current Status: Phase 4 ✅
+## Current Status: Phase 5b ✅
 
 - ✅ Basic tool window with static HTML preview (Phase 1)
 - ✅ Detect current Java file (Phase 2)
 - ✅ Find j2html methods (Phase 3)
-- ✅ **Execute and render (Phase 4)** ← NEW!
-- ⏳ Preview providers (Phase 5)
+- ✅ Execute and render (Phase 4)
+- ✅ **@Preview annotation for friendly names (Phase 5b)** ← NEW!
+- ⏳ Preview providers with parameters (Phase 5c)
 - ⏳ Live updates (Phase 6)
+
+## Phase 5b Features
+
+### 🏷️ @Preview Annotation Support
+- **Friendly Display Names**: Show descriptive names instead of method signatures in dropdown
+- **Type-Safe**: Uses Java annotation for compile-time checking
+- **Backward Compatible**: Non-annotated methods continue to work with signature display
+- **PSI Integration**: Detects annotations at design time using IntelliJ's PSI
+
+### Example Usage
+```java
+import com.example.j2htmlpreview.Preview;
+
+// Regular method - shows: userCard(User user) → DivTag
+public static DivTag userCard(User user) {
+    return div(h2(user.name), p(user.email));
+}
+
+// Preview method - shows: User Card - Alice
+@Preview(name = "User Card - Alice")
+public static DivTag userCard_alice() {
+    return userCard(new User("Alice", "alice@example.com"));
+}
+```
+
+### Dropdown Display
+**Before**: `bootstrapForm() → ContainerTag`  
+**After**: `Bootstrap Login Form` ← Clean, descriptive name
 
 ## Phase 4 Features
 
