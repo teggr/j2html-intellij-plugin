@@ -143,8 +143,8 @@ public class HtmlRendererPanel extends JPanel implements Disposable {
         if (connection != null) {
             connection.disconnect();
         }
-        if (webViewComponent != null) {
-            webViewComponent.dispose();
+        if (webViewComponent != null && !webViewComponent.isDisposed()) {
+            com.intellij.openapi.util.Disposer.dispose(webViewComponent);
         }
     }
 }

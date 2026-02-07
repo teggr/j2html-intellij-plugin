@@ -251,7 +251,8 @@ public class ExpressionEditorPanel extends JPanel implements Disposable {
         code.append(" * Preview: ").append(previewName).append("\n");
         code.append(" */\n");
         
-        String escapedName = previewName.replace("\\", "\\\\").replace("\"", "\\\"");
+        // Escape the preview name for the annotation
+        String escapedName = escapeStringLiteral(previewName);
         code.append("@Preview(name = \"").append(escapedName).append("\")\n");
         
         code.append("public static ").append(returnTypeName).append(" ").append(methodName).append("() {\n");
@@ -265,6 +266,29 @@ public class ExpressionEditorPanel extends JPanel implements Disposable {
         return code.toString();
     }
     
+    /**
+     * Escapes a string for use in a Java string literal.
+     * Handles backslashes, quotes, newlines, and other special characters.
+     */
+    private String escapeStringLiteral(String text) {
+        if (text == null) {
+            return "";
+        }
+        
+        StringBuilder escaped = new StringBuilder();
+        for (char ch : text.toCharArray()) {
+            switch (ch) {
+                case '\\' -> escaped.append("\\\\");
+                case '"' -> escaped.append("\\\"");
+                case '\n' -> escaped.append("\\n");
+                case '\r' -> escaped.append("\\r");
+                case '\t' -> escaped.append("\\t");
+                default -> escaped.append(ch);
+            }
+        }
+        return escaped.toString();
+    }
+    
     private void insertPreviewMethod(PsiClass psiClass, String methodCode) {
         if (psiClass == null) {
             throw new IllegalArgumentException("Class cannot be null");
@@ -273,7 +297,13 @@ public class ExpressionEditorPanel extends JPanel implements Disposable {
         PsiElementFactory factory = JavaPsiFacade.getElementFactory(project);
         PsiMethod newMethod = factory.createMethodFromText(methodCode, psiClass);
         
-        psiClass.add(newMethod);
+        // Try to add after the current method, otherwise add at end
+        PsiMethod anchor = currentMethod;
+        if (anchor != null && anchor.getContainingClass() == psiClass) {
+            psiClass.addAfter(newMethod, anchor);
+        } else {
+            psiClass.add(newMethod);
+        }
         
         CodeStyleManager codeStyleManager = CodeStyleManager.getInstance(project);
         codeStyleManager.reformat(newMethod);

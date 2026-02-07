@@ -100,11 +100,14 @@ public class MethodSelectorPanel extends JPanel implements Disposable {
             // Default: select first item
             if (methodSelector.getItemCount() > 0) {
                 methodSelector.setSelectedIndex(0);
-                // Trigger selection event manually since we're in updating mode
-                SwingUtilities.invokeLater(this::onMethodSelected);
             }
         } finally {
             isUpdating = false;
+        }
+        
+        // Trigger selection event manually after updating is complete
+        if (methodSelector.getItemCount() > 0) {
+            SwingUtilities.invokeLater(this::onMethodSelected);
         }
     }
     

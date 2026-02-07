@@ -139,7 +139,8 @@ public class PreviewPanelRefactored extends JPanel implements Disposable {
             new PreviewState.PreviewStateListener() {
                 @Override
                 public void onMethodSelected(PsiMethod method) {
-                    if (method != null && method.getParameterList().getParametersCount() == 0) {
+                    PsiParameterList parameterList = method != null ? method.getParameterList() : null;
+                    if (method != null && parameterList != null && parameterList.getParametersCount() == 0) {
                         // Zero parameters - execute immediately via message bus
                         project.getMessageBus()
                             .syncPublisher(PreviewExecutor.TOPIC)

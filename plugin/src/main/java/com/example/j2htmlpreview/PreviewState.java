@@ -104,7 +104,7 @@ public class PreviewState {
     }
     
     void setJ2htmlMethods(List<PsiMethod> methods) {
-        this.j2htmlMethods = new ArrayList<>(methods);
+        this.j2htmlMethods = methods != null ? new ArrayList<>(methods) : new ArrayList<>();
     }
     
     void setSelectedMethod(PsiMethod method) {

@@ -4,6 +4,7 @@ import com.intellij.psi.PsiMethod;
 import com.intellij.psi.PsiParameter;
 import com.intellij.psi.PsiType;
 import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiModifier;
 
 /**
  * Static utility class for building Java expression templates from method signatures.
@@ -31,7 +32,7 @@ public class ExpressionTemplateBuilder {
         
         // Add class name prefix for static methods
         PsiClass containingClass = method.getContainingClass();
-        if (method.hasModifierProperty("static") && containingClass != null) {
+        if (method.hasModifierProperty(PsiModifier.STATIC) && containingClass != null) {
             expression.append(containingClass.getName()).append(".");
         }
         
