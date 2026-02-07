@@ -15,8 +15,8 @@ public class J2HtmlPreviewToolWindowFactory implements ToolWindowFactory {
     
     @Override
     public void createToolWindowContent(@NotNull Project project, @NotNull ToolWindow toolWindow) {
-        // Create the preview panel (this is where the real work happens now)
-        PreviewPanel previewPanel = new PreviewPanel(project);
+        // Create the refactored preview panel with modular architecture
+        PreviewPanelRefactored previewPanel = new PreviewPanelRefactored(project);
         
         // Wrap it in a Content object and add to the tool window
         ContentFactory contentFactory = ContentFactory.getInstance();
