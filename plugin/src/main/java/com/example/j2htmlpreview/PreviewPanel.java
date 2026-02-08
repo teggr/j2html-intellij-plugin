@@ -441,9 +441,11 @@ public class PreviewPanel extends JPanel implements Disposable {
                 evaluatorPanel.setVisible(false);
                 compileAndExecute(selectedMethod);
             } else {
-                // Has parameters - show editor with template
+                // Has parameters - show editor with template and display helpful message
                 evaluatorPanel.setVisible(true);
                 populateExpressionEditor(selectedMethod);
+                // Show message indicating arguments need to be set
+                showMethodRequiresArgumentsMessage();
             }
         }
     }
@@ -711,6 +713,31 @@ public class PreviewPanel extends JPanel implements Disposable {
                 "background-color:#d1ecf1;color:#0c5460;border:2px solid #bee5eb;}" +
                 "</style></head><body><strong>ℹ️ Info:</strong> " + sanitizedMsg + "</body></html>";
             legacyHtmlPane.setText(basicInfo);
+        }
+    }
+    
+    /**
+     * Display a message indicating that the selected method requires arguments.
+     * Uses HtmlTemplates for consistent styling.
+     */
+    private void showMethodRequiresArgumentsMessage() {
+        String message = HtmlTemplates.getMethodRequiresArgumentsPage();
+        if (hasModernBrowserSupport) {
+            webViewComponent.loadHTML(constructBootstrapPage(message));
+        } else {
+            // Fallback for environments without JCEF
+            String basicMessage = 
+                "<html><head><style>" +
+                "body{font-family:Arial,sans-serif;padding:12px;margin:0;" +
+                "background-color:#fff3cd;color:#856404;border:2px solid #ffeaa7;}" +
+                "</style></head><body>" +
+                "<strong>⚙️ Method Requires Arguments</strong><br/><br/>" +
+                "The selected method requires parameters to be provided.<br/><br/>" +
+                "<strong>Next steps:</strong><br/>" +
+                "1. Set the arguments in the expression editor panel above<br/>" +
+                "2. Click the ▶ (Compile and Preview) button to render the HTML" +
+                "</body></html>";
+            legacyHtmlPane.setText(basicMessage);
         }
     }
     

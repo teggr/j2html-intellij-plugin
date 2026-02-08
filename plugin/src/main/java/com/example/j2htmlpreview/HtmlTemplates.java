@@ -88,6 +88,26 @@ public class HtmlTemplates {
     }
     
     /**
+     * Returns HTML for when a method requires arguments to be provided.
+     */
+    public static String getMethodRequiresArgumentsPage() {
+        return """
+            <div class="alert alert-warning" role="alert">
+                <h4 class="alert-heading">⚙️ Method Requires Arguments</h4>
+                <p>The selected method requires parameters to be provided.</p>
+                <hr>
+                <p class="mb-0">
+                    <strong>Next steps:</strong>
+                    <ol class="mb-0 mt-2">
+                        <li>Set the arguments in the expression editor panel above</li>
+                        <li>Click the <strong>▶</strong> (Compile and Preview) button to render the HTML</li>
+                    </ol>
+                </p>
+            </div>
+            """;
+    }
+    
+    /**
      * Wraps the given HTML content in a Bootstrap 5.3.3 page template.
      * Includes Bootstrap CSS and JS from CDN for styling.
      */
